@@ -1,0 +1,12 @@
+{
+  "name": "llm-systems-weekly",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node build.mjs"
+  },
+  "dependencies": {
+    "marked": "18.3.0"
+  }
+}
