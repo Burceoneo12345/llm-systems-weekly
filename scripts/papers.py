@@ -7,21 +7,27 @@ import warnings
 from datetime import datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
 from html.parser import HTMLParser
+from http.client import HTTPException
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 from xml.etree import ElementTree
 
 
 MODEL = re.compile(r"\b(?:[lv]lms?|language models?|reasoning models?|transformers?|"
-                   r"foundation models?|mixture.of.experts?|moes?|reinforcement learning|"
+                   r"foundation models?|mixture.of.experts?|moes?|"
                    r"rlhf|rlvr|grpo|reward models?|vllm|sglang|megatron)\b", re.I)
 SYSTEM = re.compile(r"\b(?:quantiz\w*|quantis\w*|(?:low|mixed).precision|[248][ -]?bits?|"
-                    r"(?:nv|mx)?fp[48]|int[48]|nf4|rollouts?|weight sync\w*|"
+                    r"(?:nv|mx)?fp[48]|int[48]|nf4|weight sync\w*|"
                     r"kv.cache\w*|key.value cach\w*|speculative decod\w*|prefill|"
-                    r"serving|disaggregat\w*|parallelism|(?:tensor|expert|sequence|pipeline|context) parallel\w*|"
+                    r"(?:model|llm|inference) serving|serving (?:systems?|llms?|latency|throughput|workloads?)|"
+                    r"disaggregat\w*|parallelism|(?:tensor|expert|sequence|pipeline|context) parallel\w*|"
                     r"distributed training|communication overhead|offload\w*|activation checkpoint\w*|"
                     r"(?:training|inference|decoding) (?:throughput|latency|efficiency)|"
-                    r"(?:attention|fused|gpu) kernels?|flashattention\w*|memory bandwidth)\b", re.I)
+                    r"(?:attention|fused|gpu) kernels?|flashattention\w*|memory bandwidth|"
+                    r"gradient (?:compression|checkpointing|synchronization)|fully sharded)\b", re.I)
+ROLLOUT = re.compile(r"\brollouts?\b", re.I)
+RL_SYSTEM = re.compile(r"\b(?:throughput|latency|wall.clock|asynchronous|synchronous|stragglers?|"
+                       r"workers?|weight sync\w*|gpu.hours|rollout (?:budget|control|engine|schedul\w*))\b", re.I)
 VENDOR = re.compile(r"\b(?:nvidia|amd|cuda|rocm|blackwell|instinct|mi[34]\d\d\w*)\b", re.I)
 KERNEL = re.compile(r"\b(?:gemm|matmul|matrix multiplication|tensor cores?|collectives?|"
                     r"all.reduce|all.to.all|attention kernels?|(?:nv|mx)?fp[48]|int4)\b", re.I)
@@ -30,7 +36,8 @@ ARXIV_ID = re.compile(r"(?:\d{4}\.\d{4,5}|[A-Za-z.-]+/\d{7})")
 
 def _relevant(title, body):
     text = f"{title} {body}".replace("‑", "-").replace("–", "-")
-    return (MODEL.search(text) and SYSTEM.search(text)) or (VENDOR.search(text) and KERNEL.search(text))
+    model_system = SYSTEM.search(text) or (ROLLOUT.search(text) and RL_SYSTEM.search(text))
+    return (MODEL.search(text) and model_system) or (VENDOR.search(text) and KERNEL.search(text))
 
 
 def _read(url):
@@ -75,15 +82,19 @@ def _abstract(identifier, suffix=""):
             {int(n): parsedate_to_datetime(date) for n, date in stamps})
 
 
-def _consider(found, identifier, title, body, versions, start, end):
+def _consider(found, identifier, title, body, versions, start, end, index_day=None):
     if not ARXIV_ID.fullmatch(identifier) or not versions:
         raise ValueError(f"Invalid arXiv version metadata for {identifier!r}")
     if not title.strip() or not body.strip() or any(date.utcoffset() is None for date in versions.values()):
         raise ValueError(f"Incomplete arXiv metadata for {identifier}")
     eligible = [version for version, stamp in versions.items() if start < stamp <= end]
-    if not eligible or not _relevant(title, body):
+    latest = max(versions)
+    # A version submitted before a cutoff can first appear in the index after it.
+    late = (not eligible and index_day and start.date() <= index_day <= end.date()
+            and start - timedelta(days=7) < versions[latest] <= start)
+    if (not eligible and not late) or not _relevant(title, body):
         return
-    version = max(eligible)
+    version = max(eligible) if eligible else latest
     url = f"https://arxiv.org/abs/{identifier}v{version}"
     if url in found:
         return
@@ -96,10 +107,12 @@ def _consider(found, identifier, title, body, versions, start, end):
     found[url] = {"title": " ".join(title.split()), "url": url,
                   "date": versions[version].astimezone(timezone.utc).isoformat(), "source": "arXiv",
                   "status": "预印本 v1" if version == 1 else "修订版", "body": " ".join(body.split())[:2200]}
+    if late:
+        found[url]["index_day"] = index_day.isoformat()
 
 
 def collect_papers(start, end):
-    """Return topic matches with arXiv submission/revision times in (start, end]."""
+    """Return versioned papers and separately marked late-indexed candidates."""
     if start.utcoffset() is None or end.utcoffset() is None or start >= end:
         raise ValueError("Expected an increasing timezone-aware window")
     start, end = start.astimezone(timezone.utc), end.astimezone(timezone.utc)
@@ -121,15 +134,20 @@ def collect_papers(start, end):
                 if error is not None or records is None or records.find("{*}record") is None:
                     raise ValueError(f"Invalid OAI response for cs.{category}: {getattr(error, 'text', '')}")
                 for record in records.findall("{*}record"):
-                    if record.find("{*}header").get("status") == "deleted":
+                    header = record.find("{*}header")
+                    if header is None:
+                        raise ValueError(f"Missing OAI record header in cs.{category}")
+                    if header.get("status") == "deleted":
                         continue
                     raw = record.find("{*}metadata/{*}arXivRaw")
                     if raw is None:
                         raise ValueError(f"Missing arXivRaw metadata in cs.{category}")
-                    versions = {int(v.attrib["version"].removeprefix("v")): parsedate_to_datetime(v.findtext("{*}date"))
+                    versions = {int(v.attrib["version"].removeprefix("v")): parsedate_to_datetime(v.findtext("{*}date", ""))
                                 for v in raw.findall("{*}version")}
+                    stamp = header.findtext("{*}datestamp")
+                    index_day = datetime.fromisoformat(stamp[:10]).date() if stamp else None
                     _consider(found, raw.findtext("{*}id", ""), raw.findtext("{*}title", ""),
-                              raw.findtext("{*}abstract", ""), versions, start, end)
+                              raw.findtext("{*}abstract", ""), versions, start, end, index_day)
                 token = records.findtext("{*}resumptionToken")
                 if not token:
                     break
@@ -137,7 +155,7 @@ def collect_papers(start, end):
                     raise ValueError("Repeated OAI resumption token")
                 seen_tokens.add(token)
                 params = {"verb": "ListRecords", "resumptionToken": token}
-    except (OSError, ValueError, KeyError, ElementTree.ParseError) as primary:
+    except (OSError, HTTPException, ValueError, KeyError, ElementTree.ParseError) as primary:
         try:
             day = start.date()
             checked = set()
@@ -156,7 +174,7 @@ def collect_papers(start, end):
                     checked.add(identifier)
                     _consider(found, identifier, *_abstract(identifier), start, end)
                 day += timedelta(days=1)
-        except (OSError, ValueError, KeyError) as secondary:
+        except (OSError, HTTPException, ValueError, KeyError) as secondary:
             raise RuntimeError(f"Paper discovery failed: arXiv OAI-PMH ({primary}), fallback ({secondary})") from secondary
         if not found:
             raise RuntimeError("arXiv OAI-PMH failed and curated discovery found no verified matches") from primary

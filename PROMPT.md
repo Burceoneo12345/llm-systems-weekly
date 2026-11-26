@@ -7,6 +7,7 @@
 - **训练、强化学习与推理。** 跟踪分布式并行、Attention、MoE、显存、吞吐、RL rollout、策略更新和训推权重同步。优先选择能解释瓶颈、改变工程选择或提供可复现实验的工作。
 - **低精度与 4-bit RL。** 关注 FP8、FP4、INT4 等数值格式。写清低精度用在 rollout、奖励评分、策略更新还是权重传输，涉及权重、激活、梯度或 KV cache 中的哪一项。记录保留高精度的部分，以及公开的 reward、收敛、精度和吞吐数据。
 - **NVIDIA、AMD 与开源实现。** 从 NVIDIA、AMD 的官方发布，以及 Megatron-LM、Transformer Engine、TensorRT-LLM、ROCm/aiter、vLLM、SGLang、verl 等仓库的 PR、commit 和 release 中寻找实质变化。
+- **行业通用仓库。** 同时检索 PyTorch、TorchAO、Hugging Face Transformers、TRL、FlashInfer、Triton 和 DeepSpeed 的已合并 PR。一个 PR 可以独立成为首读，整期也可以只收录代码。说明本次合入改变了哪条执行路径、影响哪些配置，给出合并记录和对应提交的源码。只有原作者报告了有基线的测试时才引用性能收益。
 
 ## 如何筛选和写作
 

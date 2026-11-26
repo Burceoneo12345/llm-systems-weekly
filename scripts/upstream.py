@@ -21,6 +21,13 @@ REPOSITORIES = {
     "vllm-project/vllm": "vLLM",
     "sgl-project/sglang": "SGLang",
     "verl-project/verl": "verl",
+    "pytorch/pytorch": "PyTorch",
+    "pytorch/ao": "TorchAO",
+    "huggingface/transformers": "Transformers",
+    "huggingface/trl": "TRL",
+    "flashinfer-ai/flashinfer": "FlashInfer",
+    "triton-lang/triton": "Triton",
+    "deepspeedai/DeepSpeed": "DeepSpeed",
 }
 
 SEARCH = """
@@ -163,7 +170,8 @@ LOW4 = re.compile(r"\b(?:(?:nv|mx)?fp4|nf4|int4|4[ -]?bit(?:rl)?|w4a(?:4|8|16)|a
 RL = re.compile(r"\b(?:rollouts?|rl|rlhf|rlvr|ppo|grpo|dapo|qat|reinforcement learning|reward|policy|weight sync)\b")
 SYSTEMS = re.compile(
     r"\b(?:parallel(?:ism)?|distributed|attention|moe|experts?|kv cache|throughput|memory|prefill|decoding|"
-    r"all[ -]?(?:to[ -]?all|gather|reduce)|offload|gemm|speculative|checkpointing|activation recomput\w*)\b"
+    r"all[ -]?(?:to[ -]?all|gather|reduce)|reduce.scatter|fsdp\d*|dtensor|inductor|cuda graphs?|"
+    r"flashattention\w*|offload|gemm|speculative|checkpointing|activation recomput\w*)\b"
 )
 PRECISION = re.compile(r"\b(?:(?:mx)?fp8|int8|quantiz\w*|dequantiz\w*|low[ -]precision)\b")
 HOUSEKEEPING = re.compile(
@@ -272,4 +280,28 @@ def source_link(item):
     if not files:
         return ""
     path = max(files, key=lambda entry: entry[0])[1]
-    return f"https://github.com/{repo}/blob/{pr['mergeCommit']['oid']}/{quote(path)}"
+    link = f"https://github.com/{repo}/blob/{pr['mergeCommit']['oid']}/{quote(path)}"
+    # The REST file list also provides an actual diff for a more precise source citation.
+    request = Request(f"https://api.github.com/repos/{repo}/pulls/{match[2]}/files?per_page=100",
+                      headers={"Authorization": "Bearer " + (os.getenv("GH_TOKEN") or os.environ["GITHUB_TOKEN"]),
+                               "User-Agent": "llm-systems-weekly"})
+    try:
+        with urlopen(request, timeout=20) as response:
+            patch = next((f.get("patch", "") for f in json.load(response) if f["filename"] == path), "")
+        added = []
+        line = None
+        for row in patch.splitlines():
+            hunk = re.match(r"^@@ -[\d,]+ \+(\d+)(?:,\d+)? @@", row)
+            if hunk:
+                line = int(hunk[1])
+            elif line is not None and row.startswith((" ", "+")):
+                if row.startswith("+") and row[1:].strip():
+                    if not added:
+                        link += f"#L{line}"
+                    added.append(row[1:].strip())
+                line += 1
+        if added:
+            item["snippet"] = "\n".join(added)[:850]
+    except (OSError, IncompleteRead, ValueError):
+        pass  # The commit permalink and merged PR description are already verified.
+    return link

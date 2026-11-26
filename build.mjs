@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { copyFileSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { marked } from "marked";
@@ -23,7 +24,9 @@ function writePage(path, html) {
 const issues = [];
 const files = readdirSync("reports").filter(name => /^\d{4}-\d{2}-\d{2}\.md$/.test(name)).sort().reverse();
 for (const file of files) {
-  const tokens = marked.lexer(readFileSync(join("reports", file), "utf8")).filter(token => token.type !== "space");
+  const tokens = marked.lexer(readFileSync(join("reports", file), "utf8")).filter(
+    token => token.type !== "space" && !(token.type === "html" && token.raw.startsWith("<!-- pending-sources "))
+  );
   const heading = tokens.shift();
   const coverage = tokens.shift();
   if (heading?.type !== "heading" || heading.depth !== 1 || coverage?.type !== "paragraph") {
@@ -50,21 +53,22 @@ for (const file of files) {
     if (!datePattern.test(date) || !source || !status || !topics.length || !story.body.length) {
       throw new Error(`${file}「${story.title}」缺少日期、来源、状态、主题或正文`);
     }
-    Object.assign(story, { date, source, status, topics });
+    const kind = status === "已合并" ? "PR" : source === "arXiv" ? "论文" : status.includes("发布") ? "版本发布" : "";
+    Object.assign(story, { date, source, status, topics, kind });
   }
   issues.push(issue);
 }
 if (!issues.length) throw new Error("reports/ 下需要至少一期按截止日期命名的周报");
 
 function page(title, root, active, content) {
-  const nav = [["issue", "本期", ""], ["archive", "历史归档", "archive/"], ["prompt", "周报提示词", "prompt/"]];
+  const nav = [["issue", "本期周报", ""], ["archive", "历史归档", "archive/"], ["prompt", "周报提示词", "prompt/"]];
   return `<!doctype html>
 <html lang="zh-CN"><head>
   <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-  <meta name="theme-color" content="#173e56"><meta name="description" content="训练、强化学习、推理与低精度的每周论文和源码。">
+  <meta name="theme-color" content="#faf9f6"><meta name="description" content="每周一和周五，读大模型训练、强化学习、推理和低精度的新论文与源码。">
   <title>${escape(title)} · 大模型系统周报</title>
-  <link rel="icon" href="data:,"><link rel="stylesheet" href="${root}site.css">
-  <script src="${root}filter.js" defer></script>
+  <link rel="icon" href="${root}assets/compute-cover.webp"><link rel="stylesheet" href="${root}site.css?v=${assetVersion}">
+  <script src="${root}filter.js?v=${assetVersion}" defer></script>
 </head><body>
   <a class="skip" href="#main">跳到正文</a>
   <header class="mast"><div class="wrap mast-inner">
@@ -74,49 +78,74 @@ function page(title, root, active, content) {
     ).join("")}<a class="repo" href="${repository}">GitHub</a></nav>
   </div></header>
   <main id="main" class="wrap">${content}</main>
+  <footer class="wrap site-foot"><a href="${repository}/actions/workflows/pages.yml">周一、周五 09:00 更新（北京时间）</a><a href="${root}archive/">历期周报</a></footer>
 </body></html>`;
 }
 
 function issuePage(issue, root, latest) {
   const topics = new Set(issue.stories.flatMap(story => story.topics));
   const ordered = [...new Set([...topicOrder.filter(topic => topics.has(topic)), ...topics])];
-  const controls = ordered.length ? `<div class="filter-row" data-filters hidden>
-    <div class="filter-buttons" role="group" aria-label="按主题筛选">
-    <button type="button" data-topic="" aria-pressed="true">全部</button>
-    ${ordered.map(topic => `<button type="button" data-topic="${escape(topic)}" aria-pressed="false">${escape(topic)}</button>`).join("")}
-    </div><span class="count" aria-live="polite">${issue.stories.length} 条进展</span></div>` : "";
+  const kinds = [...new Set(issue.stories.map(story => story.kind).filter(Boolean))];
+  const controls = ordered.length ? `<label class="picker" data-filters hidden><span>筛选主题与来源</span>
+    <select aria-label="筛选主题与来源"><option value="">全部条目</option>
+    <optgroup label="来源类型">${kinds.map(kind => `<option value="${kind}">${kind === "PR" ? "已合并 PR" : kind}</option>`).join("")}</optgroup>
+    <optgroup label="研究方向">${ordered.map(topic => `<option value="${escape(topic)}">${escape(topic)}</option>`).join("")}</optgroup></select></label>` : "";
   const stories = issue.stories.map((story, index) => {
-    const featured = index === 0;
-    const table = featured ? story.body.find(token => token.type === "table") : undefined;
-    const prose = marked.parser(story.body.filter(token => token !== table));
-    return `<article class="story${featured ? " lead" : ""}${table ? " with-table" : ""}" data-topics="${escape(JSON.stringify(story.topics))}" id="item-${index + 1}">
-      <div class="story-main">
-        <div class="story-meta">${featured ? '<strong>本期首读</strong>' : ""}
-          <span>${escape(story.source)}</span><span>${escape(story.status)}</span><time datetime="${story.date}">${story.date.slice(5).replace("-", "/")}</time>
-        </div>
-        <h2>${escape(story.title)}</h2><div class="story-copy">${prose}</div>
-      </div>${table ? `<aside class="measure" aria-label="首读实验数据">${marked.parser([table])}</aside>` : ""}
-    </article>`;
-  }).join("");
+    const body = [...story.body];
+    const last = body.at(-1);
+    const links = last?.type === "paragraph" ? last.tokens.filter(token => token.type === "link" && /^https?:\/\//.test(token.href)) : [];
+    if (links.length) body.pop();
+    const first = body[0]?.type === "paragraph" ? body.shift() : null;
+    const lead = first ? marked.parser([first]) : "";
+    const detail = body.length ? marked.parser(body) : "";
+    const linkHTML = links.map(link => `<a href="${escape(link.href)}">${escape(link.text)}</a>`);
+    const date = `<time datetime="${story.date}">${story.date.slice(5).replace("-", ".")}</time>`;
+    const attrs = `data-topics="${escape(JSON.stringify([...story.topics, story.kind]))}" id="item-${index + 1}"`;
+    const title = marked.parseInline(story.title);
+    if (index === 0) {
+      const extra = linkHTML.slice(1).join("");
+      const evidence = detail || extra ? `<details class="evidence"><summary>展开证据与源码</summary>
+        <div class="evidence-body">${detail}${extra ? `<div class="sources">${extra}</div>` : ""}</div></details>` : "";
+      return `<article class="cover" ${attrs}>
+        <div class="cover-copy"><div class="credit"><b>本期首读</b><span>${escape(story.source)}</span><span>${escape(story.status)}</span></div>
+        <h2>${title}</h2><div class="dek">${lead}</div>
+        <div class="cover-actions">${linkHTML.length ? `<a class="primary-link" href="${escape(links[0].href)}">${story.source === "arXiv" ? "阅读原论文" : story.status === "已合并" ? "阅读合并记录" : "阅读原文"}</a>` : ""}${evidence}</div></div>
+        <figure class="cover-art"><img src="${root}assets/compute-cover.webp" width="960" height="960" alt="朱红底色上分层叠置的计算芯片版画" fetchpriority="high"></figure>
+      </article>`;
+    }
+    const sources = linkHTML.length ? `<div class="sources">${linkHTML.join("")}</div>` : "";
+    return `<article class="entry" ${attrs}>
+      <div class="entry-byline">${date}<span>${escape(story.source)}</span><small>${escape(story.status)}</small></div>
+      <div class="entry-copy"><h3>${title}</h3><div class="entry-dek">${lead}</div>
+      ${detail ? `<details class="evidence"><summary>展开技术细节</summary><div class="evidence-body">${detail}</div></details>` : ""}
+      ${sources}</div></article>`;
+  });
   const original = `${repository}/blob/main/reports/${issue.date}.md`;
+  const weekday = new Intl.DateTimeFormat("zh-CN", {weekday: "long", timeZone: "UTC"}).format(new Date(issue.date));
   return page(longDate(issue.date), root, latest ? "issue" : "archive", `
-    <header class="issue-heading"><div>
-      <h1><time datetime="${issue.date}">${longDate(issue.date)}</time></h1>
-      <p class="coverage">${escape(issue.coverage)}</p>
-    </div><div class="issue-links"><a href="${root}weeks/${issue.date}/">本期固定链接</a><a href="${original}">Markdown 原文</a></div></header>
-    ${marked.parser(issue.intro)}${controls}<div class="stories">${stories}</div>
+    <header class="folio"><div class="folio-date"><time datetime="${issue.date}">${issue.date.replaceAll("-", ".")}</time>
+      <span>${weekday}</span></div><div class="folio-controls"><span class="count" aria-live="polite">${stories.length} 条进展</span>${controls}</div></header>
+    <h1 class="sr-only">${longDate(issue.date)}大模型系统周报</h1>
+    ${issue.intro.length ? `<div class="issue-note">${marked.parser(issue.intro)}</div>` : ""}
+    ${stories[0] ?? ""}
+    ${stories.length > 1 ? `<section class="index-section" aria-label="论文与源码">
+      <div class="reading-rail"><h2>论文与源码</h2><p class="coverage">${escape(issue.coverage)}</p>
+      <div class="rail-links"><a href="${root}weeks/${issue.date}/">本期固定链接</a><a href="${original}">Markdown 原文</a></div></div>
+      <div class="index-list">${stories.slice(1).join("")}</div></section>` :
+      `<div class="compact-coverage"><span>${escape(issue.coverage)}</span><a href="${original}">Markdown 原文</a><a href="${root}weeks/${issue.date}/">本期固定链接</a></div>`}
     ${issue.follow?.length ? `<section class="follow"><h2>本周跟进</h2>${marked.parser(issue.follow)}</section>` : ""}`);
 }
 
-mkdirSync(output, { recursive: true });
-for (const asset of ["site.css", "filter.js"]) copyFileSync(asset, join(output, asset));
+const assetVersion = createHash("sha256").update(readFileSync("site.css")).update(readFileSync("filter.js")).digest("hex").slice(0, 10);
+mkdirSync(join(output, "assets"), { recursive: true });
+for (const asset of ["site.css", "filter.js", "assets/compute-cover.webp"]) copyFileSync(asset, join(output, asset));
 writePage("", issuePage(issues[0], "./", true));
 for (const issue of issues) writePage(`weeks/${issue.date}`, issuePage(issue, "../../", issue === issues[0]));
 const archive = issues.map(issue => `<li><a href="../weeks/${issue.date}/">
-  <time datetime="${issue.date}">${longDate(issue.date)}</time>
-  <strong>${escape(issue.stories[0]?.title ?? "本周检索记录")}</strong>
+  <time datetime="${issue.date}">${issue.date.replaceAll("-", ".")}</time>
+  <strong>${marked.parseInline(issue.stories[0]?.title ?? "本期检索记录")}</strong>
   <span>${issue.stories.length} 条进展</span></a></li>`).join("");
 writePage("archive", page("历史归档", "../", "archive",
-  `<div class="subpage"><h1>历史归档</h1><ul class="archive-list">${archive}</ul></div>`));
+  `<section class="subpage archive"><header class="subhead"><h1>历史归档</h1><span>${issues.length} 期</span></header><ul class="archive-list">${archive}</ul></section>`));
 writePage("prompt", page("周报提示词", "../", "prompt",
   `<article class="subpage prompt">${marked.parse(readFileSync("PROMPT.md", "utf8"))}</article>`));

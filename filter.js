@@ -1,29 +1,29 @@
-const controls = document.querySelector("[data-filters]");
-if (controls) {
-  const buttons = [...controls.querySelectorAll("button[data-topic]")];
-  const cards = [...document.querySelectorAll("article[data-topics]")];
+const filters = document.querySelector("[data-filters]");
+if (filters) {
+  const picker = filters.querySelector("select");
+  const items = [...document.querySelectorAll("article[data-topics]")];
+  const index = document.querySelector(".index-section");
   const follow = document.querySelector(".follow");
-  function selectTopic(value) {
-    const selected = buttons.some(button => button.dataset.topic === value) ? value : "";
-    let count = 0;
-    for (const card of cards) {
-      card.hidden = Boolean(selected) && !JSON.parse(card.dataset.topics).includes(selected);
-      if (!card.hidden) count++;
+
+  function applyTopic(value) {
+    picker.value = [...picker.options].some(option => option.value === value) ? value : "";
+    let visible = 0;
+    for (const item of items) {
+      item.hidden = Boolean(picker.value) && !JSON.parse(item.dataset.topics).includes(picker.value);
+      if (!item.hidden) visible++;
     }
-    for (const button of buttons) button.setAttribute("aria-pressed", String(button.dataset.topic === selected));
-    controls.querySelector(".count").textContent = `${count} 条进展`;
-    if (follow) follow.hidden = Boolean(selected);
+    document.querySelector(".count").textContent = `${visible} 条进展`;
+    index?.classList.toggle("only-rail", !index.querySelector(".entry:not([hidden])"));
+    if (follow) follow.hidden = Boolean(picker.value);
   }
-  controls.addEventListener("click", event => {
-    const button = event.target.closest("button[data-topic]");
-    if (!button) return;
+
+  picker.addEventListener("change", () => {
     const url = new URL(location.href);
-    const topic = button.dataset.topic;
-    if (topic) url.searchParams.set("topic", topic);
+    if (picker.value) url.searchParams.set("topic", picker.value);
     else url.searchParams.delete("topic");
     history.replaceState(null, "", url);
-    selectTopic(topic);
+    applyTopic(picker.value);
   });
-  selectTopic(new URLSearchParams(location.search).get("topic"));
-  controls.hidden = false;
+  applyTopic(new URLSearchParams(location.search).get("topic"));
+  filters.hidden = false;
 }

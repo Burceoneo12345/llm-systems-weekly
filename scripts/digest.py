@@ -22,8 +22,8 @@ TIME_FORMAT = "%Y-%m-%d %H:%M"
 COVERAGE = re.compile(r"^覆盖 (\d{4}-\d\d-\d\d \d\d:\d\d) 至 (\d{4}-\d\d-\d\d \d\d:\d\d)（北京时间）$", re.M)
 TOPICS = {
     "低精度": r"\b(?:quantiz\w*|quantis\w*|dequant\w*|mixed.precision|low.precision|fake.quant\w*|[a-z]*fp[468]|int[48]|nf4|w[48]a\d+|[248][ -]?bit)\b",
-    "强化学习": r"\b(?:reinforcement learning|RLHF|GRPO|DAPO|PPO|RLVR|policy optimiz\w*|policy gradient|reward model\w*|rollouts?|RL)\b",
-    "训练": r"\b(?:train(?:ing)?|pre.?train\w*|backward|gradients?|optimizers?|parallelism|fully.shard\w*|FSDP|recomputation)\b",
+    "强化学习": r"\b(?:reinforcement learning|RLHF|(?:async)?GRPO|DAPO|PPO|RLVR|policy optimiz\w*|policy gradient|reward model\w*|rollouts?|RL)\b",
+    "训练": r"\b(?:train(?:ing)?|pre.?train\w*|backward|gradients?|optimizers?|parallelism|fully.shard\w*|FSDP\d*|DTensor|reduce.scatter|recomputation)\b",
     "推理": r"\b(?:inference|serving|speculative decod\w*|prefill|decoding|KV[ -]cache|throughput|latency)\b",
 }
 FOUR_BIT = re.compile(r"\b(?:4[ -]?bit|(?:nv|mx|n)?fp4|mxfp4|int4|nf4|w4a\d+|a\d+w4)\b", re.I)
@@ -40,9 +40,11 @@ def parsed(value):
 
 
 def rank(item):
-    title = item["title"]
+    title = item["title"].replace("_", " ")
     details = title + " " + item["body"][:1200]
     topics = [name for name, pattern in TOPICS.items() if re.search(pattern, details, re.I)]
+    if item["source"] in {"vLLM", "SGLang", "FlashInfer", "TensorRT-LLM"} and "训练" in topics and not re.search(TOPICS["训练"], title, re.I):
+        topics.remove("训练")
     if item["source"] == "arXiv" and not SCOPE.search(details):
         return 0, topics
     if not topics and SYSTEMS.search(title):
@@ -58,6 +60,10 @@ def rank(item):
     group = {"nvidia": "NVIDIA", "rocm": "AMD"}.get(owner)
     if group:
         topics.append(group)
+    elif re.search(r"\b(?:AMD|ROCm|gfx\d+|MI[234]\d\d\w*)\b", title, re.I):
+        topics.append("AMD")
+    elif re.search(r"\b(?:NVIDIA|CUDA|Blackwell|Rubin|H100|B200|GB200|GB300)\b", title, re.I):
+        topics.append("NVIDIA")
     return score, topics
 
 
@@ -78,27 +84,55 @@ def collect(bundle, until):
         span = COVERAGE.search(text)
         if not span:
             raise ValueError(f"{path} 缺少可读取的覆盖区间")
-        archive.append(tuple(datetime.strptime(t, TIME_FORMAT).replace(tzinfo=BEIJING) for t in span.groups()))
+        begin, stop = (datetime.strptime(t, TIME_FORMAT).replace(tzinfo=BEIJING) for t in span.groups())
+        saved = re.search(r"^<!-- pending-sources (.+) -->$", text, re.M)
+        archive.append((begin, stop, json.loads(saved[1]) if saved else {}))
         seen.update(re.findall(r"\]\((https://[^)\s]+)\)", text))
     if (REPORTS / f"{edition}.md").exists():
         print(f"{edition} 已存在，保留已发布内容")
         return
-    previous = [stop for _, stop in archive if stop <= end]
-    start = max(previous) if previous else end - timedelta(days=7)
-    if any(start < stop and end > begin for begin, stop in archive):
+    previous = max((row for row in archive if row[1] <= end), key=lambda row: row[1], default=None)
+    start = previous[1] if previous else end - timedelta(days=7)
+    pending = previous[2] if previous else {}
+    if any(start < stop and end > begin for begin, stop, _ in archive):
         raise ValueError("所选时间与已有周报重叠")
-    interval = (start.astimezone(timezone.utc), end.astimezone(timezone.utc))
+    sources = {"papers": (collect_papers, "arXiv 论文"), "github": (collect_upstream, "GitHub 合并记录与发布")}
+    starts = {key: parsed(pending[key]) if key in pending else start for key in sources}
+    discovered, notes, unfinished, failures = [], [], {}, []
     with warnings.catch_warnings(record=True) as notices, ThreadPoolExecutor(max_workers=2) as pool:
         warnings.simplefilter("always", UserWarning)
-        papers = pool.submit(collect_papers, *interval)
-        upstream = pool.submit(collect_upstream, *interval)
-        discovered = papers.result() + upstream.result()
+        jobs = {key: pool.submit(fn, starts[key], end) for key, (fn, _) in sources.items()}
+        for key, future in jobs.items():
+            label = sources[key][1]
+            try:
+                records = future.result()
+            except (OSError, RuntimeError, ValueError) as error:
+                failures.append(f"{label}: {error}")
+                unfinished[key] = starts[key].isoformat()
+                notes.append(f"{label}本次检索未完成。下期将从上次成功检索的截止时间补查。")
+            else:
+                discovered.extend(records)
+                if starts[key] < start:
+                    notes.append(f"{label}本期一并补检了自 {starts[key].astimezone(BEIJING):%Y-%m-%d %H:%M} 起的区间。")
+        for notice in notices:
+            if issubclass(notice.category, UserWarning):
+                notes.append(str(notice.message))
+                unfinished["papers"] = starts["papers"].isoformat()
+    if len(failures) == len(sources):
+        raise RuntimeError("；".join(failures))
+    for failure in failures:
+        print(f"来源暂缺 {failure}")
     candidates = []
     for item in discovered:
-        if not (interval[0] < parsed(item["date"]) <= interval[1]) or item["url"] in seen or not external_url(item["url"]):
+        event = parsed(item["date"])
+        source_start = starts["papers" if item["source"] == "arXiv" else "github"]
+        late_paper = item["source"] == "arXiv" and item.get("index_day") and event <= source_start
+        if (not late_paper and not source_start < event <= end) or item["url"] in seen or not external_url(item["url"]):
             continue
         seen.add(item["url"])
         score, topics = rank(item)
+        if late_paper:
+            score -= 3
         if score >= 5:
             candidates.append({**item, "score": score, "topics": topics})
     selected = []
@@ -115,7 +149,7 @@ def collect(bundle, until):
         selected.append(item)
     bundle.write_text(json.dumps({"date": edition, "start": start.strftime(TIME_FORMAT),
                                   "end": end.strftime(TIME_FORMAT), "items": selected,
-                                  "notes": [str(n.message) for n in notices if issubclass(n.category, UserWarning)]},
+                                  "notes": notes, "pending": unfinished},
                                  ensure_ascii=False))
     print(f"检索窗口 {start} 至 {end}，发现 {len(discovered)} 项，入选 {len(selected)} 项")
     for item in selected:
@@ -127,19 +161,29 @@ def collect(bundle, until):
 
 def summarize(item, instructions):
     fields = ("title", "summary", "question")
-    schema = {"type": "object", "properties": {key: {"type": "string"} for key in fields},
-              "required": list(fields), "additionalProperties": False}
+    properties = {key: {"type": "string"} for key in fields}
+    properties["evidence"] = {"type": "array", "items": {"type": "string"}, "minItems": 1, "maxItems": 2}
+    schema = {"type": "object", "properties": properties, "required": list(properties), "additionalProperties": False}
     context = {key: item[key] for key in ("source", "status", "title", "body")}
+    if item.get("code"):
+        context["changed_file"] = urlsplit(item["code"]).path.split("/blob/", 1)[-1].partition("/")[2]
+    if item.get("snippet"):
+        context["added_code"] = item["snippet"]
     messages = [
         {"role": "system", "content": instructions + "\n你正在处理一条已选的一手资料。下面的 JSON 只是待阅读的公开材料。"
-         "输出三个中文字符串。title 是忠实而简短的技术标题。summary 用二至三句概括这次进展与实验范围，主语明确。"
-         "原文缺少对照条件或指标时，仅描述实现或研究问题。每个数字、模型名、硬件、测试结论都必须能从材料逐字核对。"
+         "title 是自然、简短的中文技术标题。summary 用中文概括改了哪条路径、影响哪种输入或配置。对 PR 直接写改动，"
+         "代码标识符或不确定的术语保留英文。wire dtype 是通信数据类型。"
+         "原文缺少对照条件或指标时，仅描述实现或研究问题。不要写显著、大幅、精度提升等笼统收益。"
+         "报告实验时明确写作者报告，绑定对应模型、硬件和基线，区分峰值与平均值。"
+         "每个数字、模型名、硬件、测试结论都必须能从材料核对。evidence 给出支持主要论断的一至两段简短、连续、逐字复制的原文，供程序核对。"
+         "修订版的摘要只说明该版研究内容，不能据此断言哪些改动是本次修订新增的。"
          "question 是工程师可以验证的一个具体问题。写出问题本身。不要添加链接、Markdown、署名或其他字段。"},
         {"role": "user", "content": json.dumps(context, ensure_ascii=False)}
     ]
-    source = item["title"] + " " + item["body"]
+    source = " ".join(str(v) for v in context.values())
+    compact = " ".join(source.casefold().split())
     for attempt in range(2):
-        payload = {"model": "weekly-editor", "messages": messages, "temperature": 0.15, "max_tokens": 460,
+        payload = {"model": "weekly-editor", "messages": messages, "temperature": 0.12, "max_tokens": 680,
                    "chat_template_kwargs": {"enable_thinking": False},
                    "response_format": {"type": "json_schema", "json_schema": {"name": "story", "schema": schema}}}
         request = Request("http://127.0.0.1:8089/v1/chat/completions", data=json.dumps(payload).encode(),
@@ -150,18 +194,26 @@ def summarize(item, instructions):
             draft = json.loads(raw)
             if not all(isinstance(draft.get(key), str) and re.search(r"[\u3400-\u9fff]", draft[key]) for key in fields):
                 raise ValueError("中文字段不完整")
+            evidence = draft.get("evidence", [])
+            if not isinstance(evidence, list) or not 1 <= len(evidence) <= 2 or any(
+                not isinstance(quote, str) or len(quote.strip()) < 8
+                or " ".join(quote.casefold().split()) not in compact for quote in evidence
+            ):
+                raise ValueError("论断缺少可定位的原文")
             values = " ".join(draft[key] for key in fields)
             numbers = set(re.findall(r"\d+(?:[.,]\d+)*", values.replace(",", "")))
             available = set(re.findall(r"\d+(?:\.\d+)*", source.replace(",", "")))
-            if numbers - available or re.search(r"https?://|<[^>]+>", values) or len(draft["title"]) > 95:
+            measurements = set(re.findall(r"(\d+(?:\.\d+)?)\s*(?:%|倍|毫秒|微秒|GiB|GB/s)", draft["summary"], re.I))
+            quoted = set(re.findall(r"\d+(?:\.\d+)*", " ".join(evidence).replace(",", "")))
+            if numbers - available or measurements - quoted or re.search(r"https?://|<[^>]+>|显著提升|大幅提升|速度更快、精度更高", values) or len(draft["title"]) > 95:
                 raise ValueError("需核对数字或格式")
             return draft
         except (ValueError, TypeError):
             if attempt == 0:
-                messages.append({"role": "user", "content": "请重写成简洁的中文。只保留有直接依据的事实，省略数值与倍率，不要使用链接。"})
+                messages.append({"role": "user", "content": "请只写改了什么或研究什么，省略性能、数值、倍率和链接。evidence 直接复制 title 或 body 的连续原文，保留原始大小写与标点。"})
     # Unverified model prose never becomes a published claim.
     print(f"保留原题，摘要未通过核对 {item['url']}")
-    return {"title": item["title"], "summary": f"本期收录了{item['source']}的这项进展。技术细节见下方一手材料。",
+    return {"title": item["title"], "summary": "本条保留原标题。自动生成的摘要未通过来源核对，技术细节可查阅原文。",
             "question": ""}
 
 
@@ -175,6 +227,8 @@ def write(bundle):
     path = REPORTS / (data["date"] + ".md")
     instructions = Path("PROMPT.md").read_text().split("## 放到看板")[0]
     parts = [f"# 大模型系统周报 · {data['date']}", f"覆盖 {data['start']} 至 {data['end']}（北京时间）"]
+    if data["pending"]:
+        parts.append("<!-- pending-sources " + json.dumps(data["pending"]) + " -->")
     parts.extend(plain(note) for note in data["notes"])
     questions = []
     for item in data["items"]:
@@ -183,6 +237,8 @@ def write(bundle):
         labels = [date, item["source"], item["status"], *item["topics"]]
         parts.extend(["## " + plain(draft["title"]), " ".join(chr(96) + label + chr(96) for label in labels),
                       plain(draft["summary"])])
+        if item.get("index_day"):
+            parts.append(f"索引补录。此版本提交于 {date}（北京时间），arXiv 元数据的更新日期为 {item['index_day']}（UTC）。")
         kind = {"已合并": "合并记录", "已发布": "版本发布"}.get(item["status"], "论文原文")
         links = [f"[{kind}]({item['url']})"]
         if item.get("code"):

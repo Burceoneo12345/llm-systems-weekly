@@ -28,14 +28,19 @@ jobs:
     permissions:
       actions: read
       contents: write
+    outputs:
+      report: ${{ steps.collect.outputs.path }}
     steps:
       - uses: actions/checkout@v7
         with:
           ref: main
+          fetch-depth: 0
       - uses: actions/setup-node@v7
         with:
           node-version: 24
       - run: npm ci
+      - name: 检查单一来源发布与停机补检
+        run: python3 -m unittest discover -s tests
       - name: 检索论文、合并记录和版本发布
         id: collect
         if: github.event_name != 'push'
@@ -51,8 +56,8 @@ jobs:
         if: steps.collect.outputs.path != '' && steps.collect.outputs.count != '0'
         uses: actions/cache@v6
         with:
-          path: ~/.cache/weekly-qwen3
-          key: weekly-qwen3-4b-q4km-7485fe6f
+          path: ~/.cache/weekly-qwen3-8b
+          key: weekly-qwen3-8b-q4km-d98cdcbd
       - name: 在 GitHub 托管 CPU 上撰写中文周报
         if: steps.collect.outputs.path != ''
         env:
@@ -73,7 +78,17 @@ jobs:
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add -- "$REPORT"
           git commit -m "发布大模型系统周报 $(basename "$REPORT" .md)"
-          git push origin HEAD:main
+          if ! git push origin HEAD:main; then
+            git fetch origin main
+            if ! git diff --quiet HEAD^ origin/main -- reports/; then
+              echo "检索期间归档发生变动，需要基于新检索区间重跑。"
+              exit 1
+            fi
+            git rebase origin/main
+            npm ci
+            npm run build
+            git push origin HEAD:main
+          fi
       - uses: actions/upload-pages-artifact@v5
         with:
           path: _site
@@ -90,3 +105,15 @@ jobs:
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v5
+      - name: 检查已发布的页面
+        env:
+          SITE: ${{ steps.deployment.outputs.page_url }}
+          REPORT: ${{ needs.build.outputs.report }}
+        run: |
+          url="${SITE%/}/"
+          if [[ -n "$REPORT" ]]; then
+            url="${url}weeks/$(basename "$REPORT" .md)/"
+          fi
+          curl -fsSL --retry 5 --retry-all-errors --retry-delay 4 "$url" -o "$RUNNER_TEMP/published.html"
+          grep -Fq '大模型系统周报' "$RUNNER_TEMP/published.html"
+          printf '已发布 [大模型系统周报](%s)\n' "$url" >> "$GITHUB_STEP_SUMMARY"
