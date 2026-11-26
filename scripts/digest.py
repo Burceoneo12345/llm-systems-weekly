@@ -249,7 +249,7 @@ def write(bundle):
     if questions:
         parts.extend(["## 本周跟进", "\n".join(questions)])
     if not data["items"]:
-        parts.append("本期检索了论文和上游仓库，未发现达到收录标准的新条目。")
+        parts.append("本期已完成的检索中，未发现达到收录标准的新条目。")
     with path.open("x") as output:
         output.write("\n\n".join(parts) + "\n")
     print(f"已生成 {path}")

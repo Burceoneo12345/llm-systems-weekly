@@ -288,20 +288,23 @@ def source_link(item):
     try:
         with urlopen(request, timeout=20) as response:
             patch = next((f.get("patch", "") for f in json.load(response) if f["filename"] == path), "")
-        added = []
+        hunks = []
         line = None
         for row in patch.splitlines():
             hunk = re.match(r"^@@ -[\d,]+ \+(\d+)(?:,\d+)? @@", row)
             if hunk:
                 line = int(hunk[1])
+                hunks.append([])
             elif line is not None and row.startswith((" ", "+")):
                 if row.startswith("+") and row[1:].strip():
-                    if not added:
-                        link += f"#L{line}"
-                    added.append(row[1:].strip())
+                    hunks[-1].append((line, row[1:].strip()))
                 line += 1
+        # Link to the largest changed hunk so an early import rarely becomes the reading entry point.
+        added = max(hunks, key=len, default=[])
         if added:
-            item["snippet"] = "\n".join(added)[:850]
+            first, last = added[0][0], added[-1][0]
+            link += f"#L{first}-L{last}" if first < last else f"#L{first}"
+            item["snippet"] = "\n".join(code for _, code in added)[:850]
     except (OSError, IncompleteRead, ValueError):
         pass  # The commit permalink and merged PR description are already verified.
     return link
