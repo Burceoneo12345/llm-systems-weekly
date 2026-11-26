@@ -1,5 +1,7 @@
 import json
 import os
+import shutil
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -33,9 +35,33 @@ class PaperRelevanceTest(unittest.TestCase):
             with self.subTest(title=title):
                 self.assertFalse(papers._relevant(title, body))
 
-    def test_new_categories_use_oai_set_names(self):
-        self.assertIn(("stat", "ML"), papers.CATEGORIES)
-        self.assertIn(("cs", "NE"), papers.CATEGORIES)
+    def test_next_run_uses_the_categories_and_terms_in_its_own_prompt(self):
+        with tempfile.TemporaryDirectory() as directory:
+            checkout = Path(directory)
+            shutil.copytree(ROOT / "scripts", checkout / "scripts", ignore=shutil.ignore_patterns("__pycache__"))
+            (checkout / "PROMPT.md").write_text(
+                "# 周报提示词\n\n## 检索方法\n\n论文扫描 cs.IR。\n"
+                "| 维度 | 关键词 |\n| --- | --- |\n| 数值格式 | ExampleFormat |\n"
+                "| 训练环节 | example training |\n| 推理环节 | example serving |\n| 硬件与生态 | ExampleChip |\n"
+            )
+            check = """
+from datetime import datetime, timezone
+from unittest.mock import patch
+from urllib.parse import parse_qs, urlsplit
+import digest, papers, upstream
+
+with patch.object(papers, "_read", return_value=b'<OAI-PMH><error code="noRecordsMatch"/></OAI-PMH>') as api:
+    papers.collect_papers(datetime(2026, 1, 1, tzinfo=timezone.utc), datetime(2026, 1, 2, tzinfo=timezone.utc))
+assert [parse_qs(urlsplit(call.args[0]).query)["set"] for call in api.call_args_list] == [["cs:cs:IR"]]
+assert papers._relevant("ExampleFormat for LLMs", "")
+assert papers._relevant("GEMM kernels for ExampleChip", "")
+item = dict(title="Support ExampleFormat", source="PyTorch", status="已合并", date="2026-01-02",
+            url="https://github.com/pytorch/pytorch/pull/1", body="")
+assert upstream._rank(item) > upstream._rank(dict(item, title="Support another format"))
+assert "低精度" in digest.rank(item)[1]
+assert digest.rank(dict(item, title="GEMM kernels for ExampleChip", source="arXiv"))[0] > 0
+"""
+            subprocess.run([sys.executable, "-c", check], cwd=checkout / "scripts", check=True)
 
 
 class OpenPullWatchListTest(unittest.TestCase):

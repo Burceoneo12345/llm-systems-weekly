@@ -12,6 +12,8 @@ from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 from xml.etree import ElementTree
 
+from search_prompt import CATEGORIES, KEYWORDS
+
 
 # A paper is relevant when it names a model family and a systems concern, a rollout
 # system, or an accelerator vendor together with a kernel-level term. Recall matters
@@ -44,15 +46,23 @@ KERNEL = re.compile(r"\b(?:gemm|matmul|matrix multiplication|tensor cores?|colle
                     r"all.reduce|all.to.all|attention kernels?|kernels?|(?:nv|mx)?fp[48]|int4|"
                     r"cutlass|\bcute\b|triton|tma|fused|microscaling|block.scal\w*|dequant\w*)\b", re.I)
 ARXIV_ID = re.compile(r"(?:\d{4}\.\d{4,5}|[A-Za-z.-]+/\d{7})")
-# OAI-PMH sets (archive, category) that publish LLM systems, quantization and RL infrastructure.
-CATEGORIES = (("cs", "CL"), ("cs", "LG"), ("cs", "DC"), ("cs", "AR"), ("cs", "AI"), ("cs", "PF"), ("cs", "PL"),
-              ("cs", "NE"), ("stat", "ML"))
+
+
+def hardware_kernel(text):
+    return bool((VENDOR.search(text) or KEYWORDS["硬件与生态"].search(text)) and KERNEL.search(text))
 
 
 def _relevant(title, body):
     text = f"{title} {body}".replace("‑", "-").replace("–", "-")
-    model_system = SYSTEM.search(text) or (ROLLOUT.search(text) and RL_SYSTEM.search(text))
-    return (MODEL.search(text) and model_system) or (VENDOR.search(text) and KERNEL.search(text))
+    if MODEL.search(text):
+        if (SYSTEM.search(text) or KEYWORDS["数值格式"].search(text) or KEYWORDS["推理环节"].search(text)
+                or (ROLLOUT.search(text) and RL_SYSTEM.search(text))):
+            return True
+        # A method name such as GRPO supplies the model match, but needs a separate systems term.
+        if any(not (MODEL.fullmatch(hit[0]) or ROLLOUT.fullmatch(hit[0]))
+               for hit in KEYWORDS["训练环节"].finditer(text)):
+            return True
+    return hardware_kernel(text)
 
 
 def _read(url):

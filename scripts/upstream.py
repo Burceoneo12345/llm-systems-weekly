@@ -12,6 +12,8 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import quote
 from urllib.request import Request, urlopen
 
+from search_prompt import KEYWORDS
+
 
 REPOSITORIES = {
     "NVIDIA/TransformerEngine": "Transformer Engine",
@@ -278,6 +280,7 @@ def _rank(item):
     rl = bool(RL.search(title))
     score = 6 * low4 + 3 * rl + 10 * (low4 and (rl or item["source"] == "verl"))
     score += 2 * bool(SYSTEMS.search(title)) + 2 * bool(PRECISION.search(title))
+    score += sum(bool(pattern.search(title)) for pattern in KEYWORDS.values())
     score -= 7 * bool(HOUSEKEEPING.search(title))
     score -= 3 * title.startswith(("revert ", "cherry-pick ", "[backport]"))
     if item["status"] == "已发布":

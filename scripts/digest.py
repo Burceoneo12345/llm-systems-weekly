@@ -12,7 +12,8 @@ from urllib.parse import urlsplit
 from urllib.request import Request, urlopen
 from zoneinfo import ZoneInfo
 
-from papers import collect_papers
+from papers import collect_papers, hardware_kernel
+from search_prompt import KEYWORDS, PROMPT_PATH
 from upstream import collect_upstream, source_link
 
 
@@ -28,6 +29,7 @@ TOPICS = {
     "训练": r"\b(?:train(?:ing)?|pre.?train\w*|backward|gradients?|optimizers?|parallelism|fully.shard\w*|FSDP\d*|DTensor|reduce.scatter|recomputation)\b",
     "推理": r"\b(?:inference|serving|speculative decod\w*|prefill|decoding|KV[ -]cache|throughput|latency)\b",
 }
+TOPICS["低精度"] += "|" + KEYWORDS["数值格式"].pattern
 FOUR_BIT = re.compile(r"\b(?:4[ -]?bit|(?:nv|mx|n)?fp4|mxfp4|int4|nf4|w4a\d+|a\d+w4)\b", re.I)
 SYSTEMS = re.compile(r"\b(?:moe|attention|all.reduce|all.to.all|context parallel\w*|grouped gemm|weight sync\w*|expert parallel\w*)\b", re.I)
 SCOPE = re.compile(r"\b(?:llms?|language models?|transformers?|reasoning models?|foundation models?|moe|inference engine|distributed training)\b", re.I)
@@ -48,7 +50,13 @@ def rank(item):
     if item["source"] in {"vLLM", "SGLang", "FlashInfer", "TensorRT-LLM"} and "训练" in topics and not re.search(TOPICS["训练"], title, re.I):
         topics.remove("训练")
     if item["source"] == "arXiv" and not SCOPE.search(details):
-        return 0, topics
+        if not hardware_kernel(details):
+            return 0, topics
+        if not topics:
+            topics.append("算子")
+    if not topics:
+        topics = [topic for topic, dimension in (("训练", "训练环节"), ("推理", "推理环节"))
+                  if KEYWORDS[dimension].search(details)]
     if not topics and SYSTEMS.search(title):
         topics.append("训练" if "megatron" in item["url"].lower() else "推理")
     if not topics or (HOUSEKEEPING.search(title) and item["status"] == "已合并"):
@@ -269,9 +277,9 @@ def plain(text):
 def write(bundle):
     data = json.loads(bundle.read_text())
     path = REPORTS / (data["date"] + ".md")
-    # 检索方法 documents discovery for maintainers; it is not guidance for summarizing one item.
+    # The collector uses 检索方法. The editor gets the scope and writing rules for a single item.
     instructions = re.sub(r"^## 检索方法\n.*?(?=^## |\Z)", "",
-                          Path("PROMPT.md").read_text().split("## 放到看板")[0], flags=re.M | re.S)
+                          PROMPT_PATH.read_text(encoding="utf-8").split("## 放到看板")[0], flags=re.M | re.S)
     parts = [f"# 大模型系统周报 · {data['date']}", f"覆盖 {data['start']} 至 {data['end']}（北京时间）"]
     if data["pending"]:
         parts.append("<!-- pending-sources " + json.dumps(data["pending"]) + " -->")
