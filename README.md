@@ -1,12 +1,12 @@
 # 大模型系统周报
 
-按周收录大模型训练、强化学习、推理、低精度，以及 NVIDIA 和 AMD 的论文与源码进展。看板支持按主题筛选，每期都有固定链接和一份可在 GitHub 直接阅读的 Markdown 原文。
+收录大模型训练、强化学习、推理、低精度，以及 NVIDIA 和 AMD 的论文与源码进展。每期都有固定链接和一份可在 GitHub 直接阅读的 Markdown 原文。
 
 [打开看板](https://burceoneo12345.github.io/llm-systems-weekly/) · [历史归档](https://burceoneo12345.github.io/llm-systems-weekly/archive/) · [周报提示词](PROMPT.md)
 
 ## 自动更新
 
-GitHub Actions 每周一、周五 09:00（Asia/Shanghai）启动。托管运行器从上一期截止时间开始，检索 arXiv 论文以及 14 个上游仓库的合并记录与版本发布。来源包括 PyTorch、TorchAO、Transformers、TRL、FlashInfer、Triton、DeepSpeed，以及 NVIDIA、AMD 和推理、RL 框架。去重后每期最多六条，可全部来自已合并 PR。看板支持按来源类型筛选。[查看跟踪仓库](scripts/upstream.py)
+GitHub Actions 每周一、周五 09:00（Asia/Shanghai）启动。托管运行器从上一期截止时间开始，检索 arXiv 论文以及 14 个上游仓库的合并记录与版本发布。来源包括 PyTorch、TorchAO、Transformers、TRL、FlashInfer、Triton、DeepSpeed，以及 NVIDIA、AMD 和推理、RL 框架。去重后每期最多六条，可全部来自已合并 PR。[查看跟踪仓库](scripts/upstream.py)
 
 中文摘要由云端 CPU 上的 Qwen3-8B 生成，模型权重按校验和缓存。每条摘要核对来源片段和数字，未经核实的生成内容退回原标题。仓库自带的 `GITHUB_TOKEN` 负责读取 GitHub 数据和提交周报。
 

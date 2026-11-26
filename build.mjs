@@ -6,7 +6,6 @@ import { marked } from "marked";
 const repository = "https://github.com/Burceoneo12345/llm-systems-weekly";
 const output = "_site";
 const datePattern = /^\d{4}-\d{2}-\d{2}$/;
-const topicOrder = ["4-bit RL", "训练", "强化学习", "推理", "低精度", "NVIDIA", "AMD"];
 const escape = (value) => String(value).replaceAll("&", "&amp;").replaceAll('"', "&quot;")
   .replaceAll("<", "&lt;").replaceAll(">", "&gt;");
 
@@ -83,13 +82,6 @@ function page(title, root, active, content) {
 }
 
 function issuePage(issue, root, latest) {
-  const topics = new Set(issue.stories.flatMap(story => story.topics));
-  const ordered = [...new Set([...topicOrder.filter(topic => topics.has(topic)), ...topics])];
-  const kinds = [...new Set(issue.stories.map(story => story.kind).filter(Boolean))];
-  const controls = ordered.length ? `<label class="picker" data-filters hidden><span>筛选主题与来源</span>
-    <select aria-label="筛选主题与来源"><option value="">全部条目</option>
-    <optgroup label="来源类型">${kinds.map(kind => `<option value="${kind}">${kind === "PR" ? "已合并 PR" : kind}</option>`).join("")}</optgroup>
-    <optgroup label="研究方向">${ordered.map(topic => `<option value="${escape(topic)}">${escape(topic)}</option>`).join("")}</optgroup></select></label>` : "";
   const stories = issue.stories.map((story, index) => {
     const body = [...story.body];
     const last = body.at(-1);
@@ -124,7 +116,7 @@ function issuePage(issue, root, latest) {
   const weekday = new Intl.DateTimeFormat("zh-CN", {weekday: "long", timeZone: "UTC"}).format(new Date(issue.date));
   return page(longDate(issue.date), root, latest ? "issue" : "archive", `
     <header class="folio"><div class="folio-date"><time datetime="${issue.date}">${issue.date.replaceAll("-", ".")}</time>
-      <span>${weekday}</span></div><div class="folio-controls"><span class="count" aria-live="polite">${stories.length} 条进展</span>${controls}</div></header>
+      <span>${weekday}</span></div><span class="count">${stories.length} 条进展</span></header>
     <h1 class="sr-only">${longDate(issue.date)}大模型系统周报</h1>
     ${issue.intro.length ? `<div class="issue-note">${marked.parser(issue.intro)}</div>` : ""}
     ${stories[0] ?? ""}
