@@ -77,6 +77,50 @@ def external_url(value):
     return url.scheme == "https" and url.netloc in {"arxiv.org", "github.com"} and not re.search(r"[\s()<>]", value)
 
 
+ISSUE_SIZE = 10
+STANDARD = 5  # score a candidate needs before the bar is relaxed to fill an issue
+
+
+def _ranked(group):
+    """Order one class: candidates at or above STANDARD first, then a turn per repository."""
+    rest, counts, chosen, watched = list(group), {}, [], False
+    while rest:
+        item = max(rest, key=lambda c: (c["score"] >= STANDARD, c["score"] - 8 * counts.get(c["source"], 0),
+                                        c["date"], c["url"]))
+        rest.remove(item)
+        # One open PR per issue; it moves to the end after selection.
+        if item["status"] == "未合并":
+            if watched:
+                continue
+            watched = True
+        counts[item["source"]] = counts.get(item["source"], 0) + 1
+        chosen.append(item)
+    return chosen
+
+
+def _halves(code, papers, room):
+    """Take equal numbers of code and paper stories, at most `room` in total."""
+    half = min(room // 2, len(code), len(papers))
+    return code[:half] + papers[:half], code[half:], papers[half:]
+
+
+def _select(pool, notes):
+    """Fill an issue with half code and half papers, relaxing the bar only to reach ISSUE_SIZE."""
+    code, papers = [c for c in pool if c["source"] != "arXiv"], [c for c in pool if c["source"] == "arXiv"]
+    selected, code_left, papers_left = _halves(_ranked(code), _ranked(papers), ISSUE_SIZE)
+    if any(c["score"] < STANDARD for c in selected):
+        notes.append("达到常规收录标准的条目不足十条，本期包含了排名靠后的候选。")
+    if len(selected) < ISSUE_SIZE:
+        # One class is exhausted: fill the remaining slots from the other, best first.
+        extra = sorted(code_left + papers_left, key=lambda c: (-c["score"], c["date"], c["url"]))
+        taken = extra[:ISSUE_SIZE - len(selected)]
+        selected += taken
+        notes.append("论文或代码一方候选不足，本期未能做到各半。" if taken
+                     else f"本期仅有 {len(selected)} 条可核实的进展。")
+    selected.sort(key=lambda c: (-c["score"], c["date"], c["url"]))
+    return sorted(selected, key=lambda item: item["status"] == "未合并")
+
+
 def collect(bundle, until):
     end = (parsed(until) if until else datetime.now(timezone.utc)).astimezone(BEIJING).replace(second=0, microsecond=0)
     if end > datetime.now(BEIJING):
@@ -138,24 +182,14 @@ def collect(bundle, until):
         score, topics = rank(item)
         if late_paper:
             score -= 3
-        if score >= 5:
+        if score > 0:
             candidates.append({**item, "score": score, "topics": topics})
-    selected = []
-    counts = {}
-    while candidates and len(selected) < 6:
-        # Give another source a turn when several candidates have similar evidence.
-        item = max(candidates, key=lambda c: (c["score"] - 8 * counts.get(c["source"], 0), c["date"], c["url"]))
-        candidates.remove(item)
-        # One open PR per issue, and never as the lead story.
-        if item["status"] == "未合并" and any(chosen["status"] == "未合并" for chosen in selected):
-            continue
-        counts[item["source"]] = counts.get(item["source"], 0) + 1
+    selected = _select(candidates, notes)
+    for item in selected:
         if item["status"] == "已合并":
             code = source_link(item)
             if code and external_url(code):
                 item["code"] = code
-        selected.append(item)
-    selected.sort(key=lambda item: item["status"] == "未合并")
     bundle.write_text(json.dumps({"date": edition, "start": start.strftime(TIME_FORMAT),
                                   "end": end.strftime(TIME_FORMAT), "items": selected,
                                   "notes": notes, "pending": unfinished},

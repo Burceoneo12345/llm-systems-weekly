@@ -158,5 +158,65 @@ class OpenPullSelectionTest(unittest.TestCase):
         self.assertNotIn("检索方法", instructions)
 
 
+class BalancedSelectionTest(unittest.TestCase):
+    @staticmethod
+    def code(number, score, status="已合并", repo="vllm-project/vllm"):
+        return {"url": f"https://github.com/{repo}/pull/{number}", "title": f"code {number}", "source": repo.split("/")[1],
+                "status": status, "body": "", "date": "2026-11-24T18:00:00Z", "score_hint": score}
+
+    @staticmethod
+    def paper(number, score):
+        return {"url": f"https://arxiv.org/abs/2611.{number:05d}v1", "title": f"paper {number}", "source": "arXiv",
+                "status": "预印本 v1", "body": "", "date": "2026-11-24T18:00:00Z", "score_hint": score}
+
+    def select(self, items):
+        with tempfile.TemporaryDirectory() as directory:
+            bundle = Path(directory) / "sources.json"
+            with patch.object(digest, "REPORTS", Path(directory)), patch.dict(digest.os.environ, {"GITHUB_OUTPUT": ""}), \
+                 patch.object(digest, "collect_papers", return_value=[]), \
+                 patch.object(digest, "collect_upstream", return_value=items), \
+                 patch.object(digest, "source_link", return_value=""), \
+                 patch.object(digest, "rank", side_effect=lambda item: (item["score_hint"], ["低精度"])):
+                digest.collect(bundle, "2026-11-26T09:00:00+08:00")
+            data = json.loads(bundle.read_text())
+        return data["items"], data["notes"]
+
+    def test_ten_stories_split_evenly_with_the_best_first(self):
+        code = [self.code(n, 20 - n) for n in range(8)]
+        code[0]["status"], code[1]["status"] = "未合并", "未合并"
+        papers = [self.paper(n, 12 - n) for n in range(8)]
+        selected, notes = self.select(code + papers)
+        self.assertEqual(len(selected), 10)
+        self.assertEqual(sum(item["source"] == "arXiv" for item in selected), 5)
+        # Both open PRs outscore the merged work, yet only the first is kept and it goes last.
+        self.assertEqual(selected[0]["url"], "https://github.com/vllm-project/vllm/pull/2")
+        self.assertEqual(selected[-1]["url"], "https://github.com/vllm-project/vllm/pull/0")
+        self.assertTrue(all(item["score"] >= digest.STANDARD for item in selected))
+        self.assertEqual([item["status"] for item in selected].count("未合并"), 1)
+        self.assertEqual(selected[-1]["status"], "未合并")
+        self.assertFalse(any("不足" in note for note in notes))
+
+    def test_short_class_is_topped_up_from_the_other_and_noted(self):
+        selected, notes = self.select([self.paper(1, 15), self.paper(2, 14)] + [self.code(n, 20 - n) for n in range(12)])
+        self.assertEqual(len(selected), 10)
+        self.assertEqual(sum(item["source"] == "arXiv" for item in selected), 2)
+        self.assertTrue(any("未能做到各半" in note for note in notes))
+
+    def test_lower_ranked_candidates_fill_a_short_class_before_topping_up(self):
+        items = ([self.code(n, 20 - n) for n in range(3)] + [self.paper(n, 17 - n) for n in range(3)]
+                 + [self.code(n, 3) for n in range(10, 14)] + [self.paper(n, 4) for n in range(10, 14)])
+        selected, notes = self.select(items)
+        self.assertEqual(len(selected), 10)
+        self.assertEqual(sum(item["source"] == "arXiv" for item in selected), 5)
+        self.assertEqual(sum(item["score"] < digest.STANDARD for item in selected), 4)
+        self.assertTrue(any("排名靠后" in note for note in notes))
+        self.assertFalse(any("未能做到各半" in note for note in notes))
+
+    def test_fewer_than_ten_reports_what_exists(self):
+        selected, notes = self.select([self.code(1, 9), self.paper(1, 9)])
+        self.assertEqual(len(selected), 2)
+        self.assertTrue(any("仅有 2 条" in note for note in notes))
+
+
 if __name__ == "__main__":
     unittest.main()

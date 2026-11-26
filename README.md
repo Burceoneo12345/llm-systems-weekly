@@ -6,7 +6,7 @@
 
 ## 自动更新
 
-GitHub Actions 每周一、周五 09:00（Asia/Shanghai）启动。托管运行器从上一期截止时间开始，检索 arXiv 论文以及 25 个上游仓库的合并记录与版本发布。论文扫描 cs.CL、cs.LG、cs.DC、cs.AR、cs.AI、cs.PF、cs.PL、cs.NE 和 stat.ML。仓库来源包括 PyTorch、TorchAO、Transformers、TRL、FlashInfer、FlashAttention、Triton、DeepSpeed，GPTQModel、bitsandbytes、AutoRound 等量化工具链，以及 NVIDIA、AMD 的 kernel 与推理、RL 框架。去重后每期最多六条，可全部来自已合并 PR。标题含低精度或 RL 训练关键词的未合并 PR 每期至多收录一条并放在末尾，标注为尚未合入的提案。[查看跟踪仓库](scripts/upstream.py) · [检索方法](PROMPT.md#检索方法)
+GitHub Actions 每周一、周五 09:00（Asia/Shanghai）启动。托管运行器从上一期截止时间开始，检索 arXiv 论文以及 25 个上游仓库的合并记录与版本发布。论文扫描 cs.CL、cs.LG、cs.DC、cs.AR、cs.AI、cs.PF、cs.PL、cs.NE 和 stat.ML。仓库来源包括 PyTorch、TorchAO、Transformers、TRL、FlashInfer、FlashAttention、Triton、DeepSpeed，GPTQModel、bitsandbytes、AutoRound 等量化工具链，以及 NVIDIA、AMD 的 kernel 与推理、RL 框架。去重后每期十条，代码与论文各五条；一方候选不足时先补该方排名靠后的候选，再用另一方补足，并在当期注明。标题含低精度或 RL 训练关键词的未合并 PR 每期至多收录一条并放在末尾，标注为尚未合入的提案。[查看跟踪仓库](scripts/upstream.py) · [检索方法](PROMPT.md#检索方法)
 
 中文摘要由云端 CPU 上的 Qwen3-8B 生成，模型权重按校验和缓存。每条摘要核对来源片段和数字，未经核实的生成内容退回原标题。仓库自带的 `GITHUB_TOKEN` 负责读取 GitHub 数据和提交周报。
 
