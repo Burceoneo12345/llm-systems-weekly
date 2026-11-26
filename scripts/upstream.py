@@ -17,24 +17,35 @@ REPOSITORIES = {
     "NVIDIA/TransformerEngine": "Transformer Engine",
     "NVIDIA/Megatron-LM": "Megatron-LM",
     "NVIDIA/TensorRT-LLM": "TensorRT-LLM",
+    "NVIDIA/Model-Optimizer": "Model Optimizer",
+    "NVIDIA/cudnn-frontend": "cuDNN Frontend",
+    "NVIDIA-NeMo/RL": "NeMo RL",
+    "ai-dynamo/dynamo": "Dynamo",
     "ROCm/aiter": "ROCm aiter",
+    "ROCm/rocm-libraries": "ROCm Libraries",
+    "ROCm/composable_kernel": "Composable Kernel",
     "vllm-project/vllm": "vLLM",
     "sgl-project/sglang": "SGLang",
     "verl-project/verl": "verl",
+    "OpenRLHF/OpenRLHF": "OpenRLHF",
     "pytorch/pytorch": "PyTorch",
     "pytorch/ao": "TorchAO",
     "huggingface/transformers": "Transformers",
     "huggingface/trl": "TRL",
     "flashinfer-ai/flashinfer": "FlashInfer",
+    "Dao-AILab/flash-attention": "FlashAttention",
     "triton-lang/triton": "Triton",
     "deepspeedai/DeepSpeed": "DeepSpeed",
+    "bitsandbytes-foundation/bitsandbytes": "bitsandbytes",
+    "ModelCloud/GPTQModel": "GPTQModel",
+    "intel/auto-round": "AutoRound",
 }
 
 SEARCH = """
 query($query: String!, $after: String) {
   search(type: ISSUE, query: $query, first: 100, after: $after) {
     issueCount pageInfo { hasNextPage endCursor }
-    nodes { ... on PullRequest { id title url mergedAt } }
+    nodes { ... on PullRequest { id title url mergedAt createdAt } }
   }
 }"""
 RELEASES = """
@@ -143,6 +154,68 @@ def _pulls(repo, start, end):
             after = page["pageInfo"]["endCursor"]
 
 
+def _open_pulls(repo, start, end):
+    # An open PR is a watch-list entry, not shipped capability. Targeted searches
+    # replace paging through every new PR; GitHub ranks a truncated result by
+    # relevance, which is enough for a watch list.
+    bounds = "..".join(t.strftime("%Y-%m-%dT%H:%M:%SZ") for t in (start.replace(microsecond=0), end.replace(microsecond=0)))
+    found = {}
+    for terms, only in OPEN_GROUPS:
+        if only and repo not in only:
+            continue
+        page = _github(SEARCH, query=f"repo:{repo} is:pr is:open created:{bounds} " + " OR ".join(terms))["search"]
+        for pr in page["nodes"]:
+            if pr["createdAt"] and start < datetime.fromisoformat(pr["createdAt"]) <= end and _watched(pr["title"]):
+                found.setdefault(pr["id"], dict(id=pr["id"], title=pr["title"], url=pr["url"], date=pr["createdAt"],
+                                                source=REPOSITORIES[repo], status="未合并"))
+    return sorted(found.values(), key=_rank, reverse=True)[:1]
+
+
+# GitHub search does not index merges made through a merge queue, which is how
+# PyTorch lands every change: its main branch gains over a hundred commits a
+# week while search reports a handful. Read the branch history instead and map
+# each squash headline's "(#number)" back to its pull request.
+COMMIT_FEED = {"pytorch/pytorch"}
+HISTORY = """
+query($owner: String!, $name: String!, $after: String) {
+  repository(owner: $owner, name: $name) {
+    defaultBranchRef { target { ... on Commit {
+      history(first: 100, after: $after) {
+        pageInfo { hasNextPage endCursor }
+        nodes { committedDate messageHeadline }
+      } } } }
+  }
+}"""
+PULL_REQUESTS = "query($owner: String!, $name: String!) { repository(owner: $owner, name: $name) {%s} }"
+
+
+def _commit_pulls(repo, start, end):
+    owner, name = repo.split("/")
+    after, oldest, headlines = None, None, {}
+    while True:
+        history = _github(HISTORY, owner=owner, name=name, after=after)["repository"]["defaultBranchRef"]["target"]["history"]
+        for node in history["nodes"]:
+            when = datetime.fromisoformat(node["committedDate"])
+            oldest = when if oldest is None else min(oldest, when)
+            change = re.search(r"\(#(\d+)\)$", node["messageHeadline"])
+            if change and start < when <= end and int(change[1]) not in headlines:
+                headlines[int(change[1])] = {"title": change.string[:change.start()].strip(), "url": "", "date": when.isoformat(),
+                                             "source": REPOSITORIES[repo], "status": "已合并"}
+        if oldest is not None and oldest <= start or not history["pageInfo"]["hasNextPage"]:
+            break
+        after = history["pageInfo"]["endCursor"]
+    chosen = sorted(headlines.items(), key=lambda entry: _rank(entry[1]), reverse=True)[:10]
+    if not chosen:
+        return
+    fields = " ".join(f"p{number}: pullRequest(number: {number}) {{ id title url mergedAt }}" for number, _ in chosen)
+    pulls = _github(PULL_REQUESTS % fields, owner=owner, name=name)["repository"]
+    for number, _ in chosen:
+        pr = pulls[f"p{number}"]
+        if pr and pr["mergedAt"]:
+            yield dict(id=pr["id"], title=pr["title"], url=pr["url"], date=pr["mergedAt"],
+                       source=REPOSITORIES[repo], status="已合并")
+
+
 def _releases(repo, start, end):
     owner, name = repo.split("/")
     after = None
@@ -167,17 +240,36 @@ def _releases(repo, start, end):
 
 
 LOW4 = re.compile(r"\b(?:(?:nv|mx)?fp4|nf4|int4|4[ -]?bit(?:rl)?|w4a(?:4|8|16)|a(?:4|8|16)w4)\b")
-RL = re.compile(r"\b(?:rollouts?|rl|rlhf|rlvr|ppo|grpo|dapo|qat|reinforcement learning|reward|policy|weight sync)\b")
+RL = re.compile(r"\b(?:rollouts?|rl|rlhf|rlvr|ppo|grpo|dapo|gspo|reinforce|qat|reinforcement learning|reward|policy|"
+                r"weight sync|train.?gen)\b")
 SYSTEMS = re.compile(
     r"\b(?:parallel(?:ism)?|distributed|attention|moe|experts?|kv cache|throughput|memory|prefill|decoding|"
     r"all[ -]?(?:to[ -]?all|gather|reduce)|reduce.scatter|fsdp\d*|dtensor|inductor|cuda graphs?|"
-    r"flashattention\w*|offload|gemm|speculative|checkpointing|activation recomput\w*)\b"
+    r"flashattention\w*|offload|gemm|grouped|speculative|checkpointing|activation recomput\w*|"
+    r"cutlass|cute|triton|tma|tensor cores?|scaling factors?|microscaling|continuous batching|paged)\b"
 )
-PRECISION = re.compile(r"\b(?:(?:mx)?fp8|int8|quantiz\w*|dequantiz\w*|low[ -]precision)\b")
+PRECISION = re.compile(r"\b(?:(?:nv|mx)?fp[468]|int[48]|quantiz\w*|dequantiz\w*|low[ -]precision|fake.quant\w*|"
+                       r"block.scal\w*)\b")
 HOUSEKEEPING = re.compile(
     r"(?:^|\[)(?:ci|chore|lint|build)(?:\]|:|\b)|"
     r"\b(?:typos?|pre-commit|dependabot|copyright|release notes|bump dependency)\b"
 )
+# Formats and phrases that make a PR still under review worth watching. GitHub
+# search silently returns nothing for a query with more than five OR operators,
+# so terms are queried in groups of six; each group costs one request per
+# repository, and the RL training phrases only apply to training frameworks.
+OPEN_GROUPS = (
+    (("NVFP4", "MXFP4", "FP4", "INT4", "NF4", "W4A16"), None),
+    (("\"weight sync\"", "\"train-gen\"", "\"training-inference mismatch\"", "FP8", "MXFP8", "quantization"),
+     {"verl-project/verl", "huggingface/trl", "OpenRLHF/OpenRLHF", "NVIDIA-NeMo/RL", "NVIDIA/Megatron-LM",
+      "NVIDIA/TransformerEngine", "deepspeedai/DeepSpeed", "pytorch/ao", "NVIDIA/Model-Optimizer"}),
+)
+WATCHED = re.compile(r"\b(?:train.?gen|training.inference mismatch|weight sync\w*|microscaling|block.scal\w*)\b")
+
+
+def _watched(title):
+    text = title.lower().replace("_", " ")
+    return bool(LOW4.search(text) or WATCHED.search(text) or (RL.search(text) and PRECISION.search(text)))
 
 
 def _rank(item):
@@ -220,9 +312,12 @@ def collect_upstream(start, end):
     candidates = {}
     for repo in REPOSITORIES:
         try:
-            pulls = {item["url"]: item for item in _pulls(repo, start, end)}
-            for item in sorted(pulls.values(), key=_rank, reverse=True)[:8]:
+            feed = _commit_pulls if repo in COMMIT_FEED else _pulls
+            pulls = {item["url"]: item for item in feed(repo, start, end)}
+            for item in sorted(pulls.values(), key=_rank, reverse=True)[:10]:
                 candidates[item["id"]] = item
+            for item in _open_pulls(repo, start, end):
+                candidates.setdefault(item["id"], item)
             for item in _releases(repo, start, end):
                 candidates[item["id"]] = item
         except (RuntimeError, KeyError, TypeError, ValueError) as error:

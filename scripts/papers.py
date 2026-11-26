@@ -13,25 +13,40 @@ from urllib.request import Request, urlopen
 from xml.etree import ElementTree
 
 
+# A paper is relevant when it names a model family and a systems concern, a rollout
+# system, or an accelerator vendor together with a kernel-level term. Recall matters
+# here; digest.rank applies the stricter scope and topic gates afterwards.
 MODEL = re.compile(r"\b(?:[lv]lms?|language models?|reasoning models?|transformers?|"
                    r"foundation models?|mixture.of.experts?|moes?|"
-                   r"rlhf|rlvr|grpo|reward models?|vllm|sglang|megatron)\b", re.I)
-SYSTEM = re.compile(r"\b(?:quantiz\w*|quantis\w*|(?:low|mixed).precision|[248][ -]?bits?|"
-                    r"(?:nv|mx)?fp[48]|int[48]|nf4|weight sync\w*|"
-                    r"kv.cache\w*|key.value cach\w*|speculative decod\w*|prefill|"
+                   r"rlhf|rlvr|grpo|dapo|ppo|gspo|\brl\b|reward models?|vllm|sglang|megatron)\b", re.I)
+SYSTEM = re.compile(r"\b(?:quantiz\w*|quantis\w*|(?:low|mixed).precision|[2468][ -]?bits?|"
+                    r"(?:nv|mx)?fp[468]|int[248]|nf4|w4a\d+|a\d+w4|microscaling|block[ -]?scal\w*|"
+                    r"master weights?|optimizer states?|weight sync\w*|weight compression|"
+                    r"kv.cache\w*|key.value cach\w*|speculative decod\w*|prefill|continuous batching|paged|"
                     r"(?:model|llm|inference) serving|serving (?:systems?|llms?|latency|throughput|workloads?)|"
-                    r"disaggregat\w*|parallelism|(?:tensor|expert|sequence|pipeline|context) parallel\w*|"
-                    r"distributed training|communication overhead|offload\w*|activation checkpoint\w*|"
+                    r"inference engines?|"
+                    r"disaggregat\w*|parallelism|(?:tensor|expert|sequence|pipeline|context|data) parallel\w*|"
+                    r"distributed training|communication overhead|communication (?:cost|volume)|all[ -]?to[ -]?all|"
+                    r"offload\w*|activation checkpoint\w*|zero-\d|fsdp\d*|long.context|"
                     r"(?:training|inference|decoding) (?:throughput|latency|efficiency)|"
-                    r"(?:attention|fused|gpu) kernels?|flashattention\w*|memory bandwidth|"
+                    r"(?:attention|fused|gpu) kernels?|tensor cores?|cutlass|\bcute\b|triton|flashattention\w*|"
+                    r"memory bandwidth|"
                     r"gradient (?:compression|checkpointing|synchronization)|fully sharded)\b", re.I)
 ROLLOUT = re.compile(r"\brollouts?\b", re.I)
 RL_SYSTEM = re.compile(r"\b(?:throughput|latency|wall.clock|asynchronous|synchronous|stragglers?|"
-                       r"workers?|weight sync\w*|gpu.hours|rollout (?:budget|control|engine|schedul\w*))\b", re.I)
-VENDOR = re.compile(r"\b(?:nvidia|amd|cuda|rocm|blackwell|instinct|mi[34]\d\d\w*)\b", re.I)
+                       r"workers?|weight sync\w*|gpu.hours|rollout (?:budget|control|engine|schedul\w*)|"
+                       r"kv.cache\w*|offload\w*|partial rollouts?|over.?generat\w*|long.tail|efficien\w*|"
+                       r"speedup|truncat\w*|max (?:length|tokens|sequence))\b", re.I)
+VENDOR = re.compile(r"\b(?:nvidia|amd|cuda|rocm|blackwell|rubin|hopper|instinct|"
+                    r"(?:gb|b|h|mi)[1-9]\d{1,2}\w*|ascend|npu|huawei|tpu|intel|gaudi|habana|groq|cerebras|"
+                    r"sambanova)\b", re.I)
 KERNEL = re.compile(r"\b(?:gemm|matmul|matrix multiplication|tensor cores?|collectives?|"
-                    r"all.reduce|all.to.all|attention kernels?|(?:nv|mx)?fp[48]|int4)\b", re.I)
+                    r"all.reduce|all.to.all|attention kernels?|kernels?|(?:nv|mx)?fp[48]|int4|"
+                    r"cutlass|\bcute\b|triton|tma|fused|microscaling|block.scal\w*|dequant\w*)\b", re.I)
 ARXIV_ID = re.compile(r"(?:\d{4}\.\d{4,5}|[A-Za-z.-]+/\d{7})")
+# OAI-PMH sets (archive, category) that publish LLM systems, quantization and RL infrastructure.
+CATEGORIES = (("cs", "CL"), ("cs", "LG"), ("cs", "DC"), ("cs", "AR"), ("cs", "AI"), ("cs", "PF"), ("cs", "PL"),
+              ("cs", "NE"), ("stat", "ML"))
 
 
 def _relevant(title, body):
@@ -121,8 +136,8 @@ def collect_papers(start, end):
     last = min(end.date() + timedelta(days=5), datetime.now(timezone.utc).date())
     found = {}
     try:
-        for category in ("CL", "LG", "DC", "AR", "AI", "PF", "PL"):
-            params = {"verb": "ListRecords", "metadataPrefix": "arXivRaw", "set": f"cs:cs:{category}",
+        for archive, category in CATEGORIES:
+            params = {"verb": "ListRecords", "metadataPrefix": "arXivRaw", "set": f"{archive}:{archive}:{category}",
                       "from": first.isoformat(), "until": last.isoformat()}
             seen_tokens = set()
             while True:
@@ -132,16 +147,16 @@ def collect_papers(start, end):
                     break
                 records = root.find("{*}ListRecords")
                 if error is not None or records is None or records.find("{*}record") is None:
-                    raise ValueError(f"Invalid OAI response for cs.{category}: {getattr(error, 'text', '')}")
+                    raise ValueError(f"Invalid OAI response for {archive}.{category}: {getattr(error, 'text', '')}")
                 for record in records.findall("{*}record"):
                     header = record.find("{*}header")
                     if header is None:
-                        raise ValueError(f"Missing OAI record header in cs.{category}")
+                        raise ValueError(f"Missing OAI record header in {archive}.{category}")
                     if header.get("status") == "deleted":
                         continue
                     raw = record.find("{*}metadata/{*}arXivRaw")
                     if raw is None:
-                        raise ValueError(f"Missing arXivRaw metadata in cs.{category}")
+                        raise ValueError(f"Missing arXivRaw metadata in {archive}.{category}")
                     versions = {int(v.attrib["version"].removeprefix("v")): parsedate_to_datetime(v.findtext("{*}date", ""))
                                 for v in raw.findall("{*}version")}
                     stamp = header.findtext("{*}datestamp")

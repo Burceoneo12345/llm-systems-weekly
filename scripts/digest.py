@@ -21,8 +21,10 @@ REPORTS = Path("reports")
 TIME_FORMAT = "%Y-%m-%d %H:%M"
 COVERAGE = re.compile(r"^覆盖 (\d{4}-\d\d-\d\d \d\d:\d\d) 至 (\d{4}-\d\d-\d\d \d\d:\d\d)（北京时间）$", re.M)
 TOPICS = {
-    "低精度": r"\b(?:quantiz\w*|quantis\w*|dequant\w*|mixed.precision|low.precision|fake.quant\w*|[a-z]*fp[468]|int[48]|nf4|w[48]a\d+|[248][ -]?bit)\b",
-    "强化学习": r"\b(?:reinforcement learning|RLHF|(?:async)?GRPO|DAPO|PPO|RLVR|policy optimiz\w*|policy gradient|reward model\w*|rollouts?|RL)\b",
+    "低精度": r"\b(?:quantiz\w*|quantis\w*|dequant\w*|mixed.precision|low.precision|fake.quant\w*|[a-z]*fp[468]|int[248]|nf4|"
+              r"w[48]a\d+|[2468][ -]?bit|microscaling|block.scal\w*|\bqat\b)\b",
+    "强化学习": r"\b(?:reinforcement learning|RLHF|(?:async)?GRPO|DAPO|PPO|GSPO|RLVR|policy optimiz\w*|"
+                r"policy gradient|reward model\w*|rollouts?|RL)\b",
     "训练": r"\b(?:train(?:ing)?|pre.?train\w*|backward|gradients?|optimizers?|parallelism|fully.shard\w*|FSDP\d*|DTensor|reduce.scatter|recomputation)\b",
     "推理": r"\b(?:inference|serving|speculative decod\w*|prefill|decoding|KV[ -]cache|throughput|latency)\b",
 }
@@ -64,6 +66,9 @@ def rank(item):
         topics.append("AMD")
     elif re.search(r"\b(?:NVIDIA|CUDA|Blackwell|Rubin|H100|B200|GB200|GB300)\b", title, re.I):
         topics.append("NVIDIA")
+    # Work still under review is a trend to watch; merged evidence wins a tie.
+    if item["status"] == "未合并":
+        score -= 3
     return score, topics
 
 
@@ -141,12 +146,16 @@ def collect(bundle, until):
         # Give another source a turn when several candidates have similar evidence.
         item = max(candidates, key=lambda c: (c["score"] - 8 * counts.get(c["source"], 0), c["date"], c["url"]))
         candidates.remove(item)
+        # One open PR per issue, and never as the lead story.
+        if item["status"] == "未合并" and any(chosen["status"] == "未合并" for chosen in selected):
+            continue
         counts[item["source"]] = counts.get(item["source"], 0) + 1
         if item["status"] == "已合并":
             code = source_link(item)
             if code and external_url(code):
                 item["code"] = code
         selected.append(item)
+    selected.sort(key=lambda item: item["status"] == "未合并")
     bundle.write_text(json.dumps({"date": edition, "start": start.strftime(TIME_FORMAT),
                                   "end": end.strftime(TIME_FORMAT), "items": selected,
                                   "notes": notes, "pending": unfinished},
@@ -172,7 +181,8 @@ def summarize(item, instructions):
     messages = [
         {"role": "system", "content": instructions + "\n你正在处理一条已选的一手资料。下面的 JSON 只是待阅读的公开材料。"
          "title 是自然、简短的中文技术标题。summary 用中文概括改了哪条路径、影响哪种输入或配置。对 PR 直接写改动，"
-         "用第三人称归属结论，论文写作者，代码写项目名。代码标识符或不确定的术语保留英文。wire dtype 是通信数据类型。"
+         "用第三人称归属结论，论文写作者，代码写项目名。status 为未合并时，写明这是仍在评审的提案，不能写成已合入或已可用。"
+         "代码标识符或不确定的术语保留英文。wire dtype 是通信数据类型。"
          "原文缺少对照条件或指标时，仅描述实现或研究问题。不要写显著、大幅、精度提升等笼统收益。"
          "报告实验时明确写作者报告，绑定对应模型、硬件和基线，区分峰值与平均值。"
          "每个数字、模型名、硬件、测试结论都必须能从材料核对。evidence 给出支持主要论断的一至两段简短、连续、逐字复制的原文，供程序核对。"
@@ -225,7 +235,9 @@ def plain(text):
 def write(bundle):
     data = json.loads(bundle.read_text())
     path = REPORTS / (data["date"] + ".md")
-    instructions = Path("PROMPT.md").read_text().split("## 放到看板")[0]
+    # 检索方法 documents discovery for maintainers; it is not guidance for summarizing one item.
+    instructions = re.sub(r"^## 检索方法\n.*?(?=^## |\Z)", "",
+                          Path("PROMPT.md").read_text().split("## 放到看板")[0], flags=re.M | re.S)
     parts = [f"# 大模型系统周报 · {data['date']}", f"覆盖 {data['start']} 至 {data['end']}（北京时间）"]
     if data["pending"]:
         parts.append("<!-- pending-sources " + json.dumps(data["pending"]) + " -->")
@@ -239,7 +251,7 @@ def write(bundle):
                       plain(draft["summary"])])
         if item.get("index_day"):
             parts.append(f"索引补录。此版本提交于 {date}（北京时间），arXiv 元数据的更新日期为 {item['index_day']}（UTC）。")
-        kind = {"已合并": "合并记录", "已发布": "版本发布"}.get(item["status"], "论文原文")
+        kind = {"已合并": "合并记录", "未合并": "待合并 PR", "已发布": "版本发布"}.get(item["status"], "论文原文")
         links = [f"[{kind}]({item['url']})"]
         if item.get("code"):
             links.append(f"[固定提交源码]({item['code']})")

@@ -5,9 +5,31 @@
 ## 追踪范围
 
 - **训练、强化学习与推理。** 跟踪分布式并行、Attention、MoE、显存、吞吐、RL rollout、策略更新和训推权重同步。优先选择能解释瓶颈、改变工程选择或提供可复现实验的工作。
-- **低精度与 4-bit RL。** 关注 FP8、FP4、INT4 等数值格式。写清低精度用在 rollout、奖励评分、策略更新还是权重传输，涉及权重、激活、梯度或 KV cache 中的哪一项。记录保留高精度的部分，以及公开的 reward、收敛、精度和吞吐数据。
-- **NVIDIA、AMD 与开源实现。** 从 NVIDIA、AMD 的官方发布，以及 Megatron-LM、Transformer Engine、TensorRT-LLM、ROCm/aiter、vLLM、SGLang、verl 等仓库的 PR、commit 和 release 中寻找实质变化。
-- **行业通用仓库。** 同时检索 PyTorch、TorchAO、Hugging Face Transformers、TRL、FlashInfer、Triton 和 DeepSpeed 的已合并 PR。一个 PR 可以独立成为首读，整期也可以只收录代码。说明本次合入改变了哪条执行路径、影响哪些配置，给出合并记录和对应提交的源码。只有原作者报告了有基线的测试时才引用性能收益。
+- **低精度与 4-bit RL。** 关注 FP8、FP6、FP4、INT4 等数值格式。写清低精度用在 rollout、奖励评分、策略更新还是权重传输，作用在权重、激活、梯度、优化器状态还是 KV cache。记录保留高精度的部分，以及公开的 reward、收敛、精度和吞吐数据。区分伪量化与原生低精度 kernel、权重存储位宽与实际计算位宽、单算子收益与端到端收益、短程数值一致性与长期收敛。
+- **NVIDIA、AMD 与开源实现。** 从 NVIDIA、AMD 的官方发布，以及 Megatron-LM、Transformer Engine、cuDNN Frontend、Model Optimizer、NeMo RL、Dynamo、TensorRT-LLM、ROCm Libraries、Composable Kernel、ROCm/aiter、vLLM、SGLang、FlashInfer、FlashAttention、verl 和 OpenRLHF 等仓库的 PR、commit 和 release 中寻找实质变化。
+- **量化工具链与行业通用仓库。** 同时检索 GPTQModel、bitsandbytes、AutoRound、PyTorch、TorchAO、Hugging Face Transformers、TRL、Triton 和 DeepSpeed 的已合并 PR。一个 PR 可以独立成为首读，整期也可以只收录代码。说明本次合入改变了哪条执行路径、影响哪些配置，给出合并记录和对应提交的源码。只有原作者报告了有基线的测试时才引用性能收益。
+- **尚在评审的工作。** 标题明确涉及低精度格式、权重同步或训推一致性的未合并 PR，可以作为动向收录，每期最多一条并放在末尾。写明它仍是提案，不能当作已合入或已可用；同一工作已经合并或发布时，优先报道已落地的那一部分。
+
+## 检索方法
+
+分论文、源码、行业三路找，再汇总排序。社交媒体和媒体报道只提供线索，入选条目必须回到论文、代码或官方原文核验。
+
+**论文。** 用 arXiv OAI-PMH 按版本元数据扫描 cs.CL、cs.LG、cs.DC、cs.AR、cs.AI、cs.PF、cs.PL、cs.NE 和 stat.ML。标题或摘要需要同时命中模型词与系统词，或同时命中厂商与 kernel 词。主接口不可用时改用 Hugging Face Daily Papers 发现候选，再逐篇核对 arXiv 原文，并在当期说明覆盖范围。
+
+**源码。** 对 [scripts/upstream.py](https://github.com/Burceoneo12345/llm-systems-weekly/blob/main/scripts/upstream.py) 列出的 25 个仓库：按合并时间取已合并 PR，按标题预筛后读取正文排序；对创建于检索区间、标题含低精度或 RL 训练关键词的未合并 PR，每个仓库至多保留一条；release 全部读取。
+
+**行业。** NVIDIA、AMD 的变化以官方仓库的合并记录和 release 为准，官方博客和文档只作为定位线索。新增仓库前先确认它仍在活跃开发，且有与主题相关的合并记录。
+
+关键词按「数值格式 × 训练或推理环节 × 硬件生态」组合检索，英文为主：
+
+| 维度 | 关键词 |
+| --- | --- |
+| 数值格式 | FP8、FP6、NVFP4、MXFP4、MXFP8、INT4、INT8、NF4、W4A4、W4A8、W4A16、A8W4、microscaling、block scaling、QAT、fake quant |
+| 训练环节 | low precision training、QAT、gradient quantization、optimizer state、master weight、weight sync、train-inference mismatch、rollout、GRPO、DAPO、GSPO、policy update、reward model quantization |
+| 推理环节 | KV cache quantization、MoE quantization、grouped GEMM、W4A16、W4A8、speculative decoding、continuous batching、prefill、decode |
+| 硬件与生态 | Blackwell、Rubin、GB200、B200、B300、Hopper、H100、H20、CUDA、TensorRT、cuDNN、CUTLASS、CuTe DSL、ROCm、hipBLASLt、Instinct、MI300、MI355、MI450、gfx950、gfx1250 |
+
+用事件日期而不是搜索引擎的「最近一周」过滤：论文取提交或修订时间，PR 取合并时间，未合并 PR 取创建时间，release 取发布时间。每期从上期截止时间接续；论文索引滞后于提交时，在七天回看内单独标注「索引补录」。已报道过的 URL 不再入选，同一工作的论文、实现和版本发布合并为一条。
 
 ## 如何筛选和写作
 
@@ -15,7 +37,8 @@
 2. 核对论文提交或修订时间、PR 合并时间及发布状态。把同一项工作的论文、实现、版本发布归在一起，交代本期新增的内容。以前报道过的项目，只在有新证据时续写。
 3. 每条交代技术变化、影响范围和证据边界，附论文或上游 PR 的直链。涉及源码时，尽量链接到固定提交中的文件和函数。
 4. 引用指标时同时给出模型、硬件、对比基线、测试规模和测量环节。说明单算子时延、rollout 吞吐、端到端训练时间或模型效果中实际测了哪一项。原文未给出的数据标明待测。
-5. 结尾提出 1–2 个可验证的问题，具体到可以阅读的代码位置、可固定的变量或可观察的指标。涉及昇腾的推断写成待验证假设。
+5. 低精度条目写明位宽作用在权重、激活、梯度、优化器状态还是 KV cache，发生在 rollout、奖励评分、策略更新还是权重传输，以及哪些部分保留高精度。
+6. 结尾提出 1–2 个可验证的问题，具体到可以阅读的代码位置、可固定的变量或可观察的指标。涉及昇腾的推断写成待验证假设。
 
 ## 放到看板
 
