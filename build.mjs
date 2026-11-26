@@ -114,7 +114,7 @@ function issuePage(issue, root, latest) {
         <div class="cover-copy"><div class="credit"><b>本期首读</b><span>${escape(story.source)}</span><span>${escape(story.status)}</span></div>
         <h2>${title}</h2><div class="dek">${lead}</div>
         <div class="cover-actions">${linkHTML.length ? `<a class="primary-link" href="${escape(links[0].href)}">${story.source === "arXiv" ? "阅读原论文" : story.status === "已合并" ? "阅读合并记录" : "阅读原文"}</a>` : ""}${evidence}</div></div>
-        <figure class="cover-art"><img src="${root}${issue.cover.file}" width="640" height="512" alt="${escape(story.title)}的主题插画" fetchpriority="high"></figure>
+        <figure class="cover-art"><img src="${root}${issue.cover.file}?v=${issue.cover.version}" width="896" height="704" alt="${escape(story.title)}的主题插画" fetchpriority="high"></figure>
       </article>`;
     }
     const sources = linkHTML.length ? `<div class="sources">${linkHTML.join("")}</div>` : "";
@@ -144,7 +144,11 @@ const assetVersion = createHash("sha256").update(readFileSync("site.css")).updat
 mkdirSync(join(output, "assets/covers"), { recursive: true });
 for (const asset of ["site.css", "filter.js", "assets/compute-cover.webp"]) copyFileSync(asset, join(output, asset));
 for (const {cover} of issues) {
-  if (cover) copyFileSync(cover.file, join(output, cover.file));
+  if (cover) {
+    const bytes = readFileSync(cover.file);
+    cover.version = createHash("sha256").update(bytes).digest("hex").slice(0, 10);
+    writeFileSync(join(output, cover.file), bytes);
+  }
 }
 writePage("", issuePage(issues[0], "./", true));
 for (const issue of issues) writePage(`weeks/${issue.date}`, issuePage(issue, "../../", issue === issues[0]));

@@ -78,7 +78,7 @@ jobs:
         uses: actions/cache@v6
         with:
           path: ~/.cache/weekly-illustration
-          key: weekly-cover-lcm-340a03e5
+          key: weekly-cover-sdxl-d54e5b43
       - name: 在托管 CPU 上生成每期独立的封面
         if: steps.covers.outputs.needed == 'true'
         env:
@@ -142,7 +142,7 @@ jobs:
           curl -fsSL --retry 5 --retry-all-errors --retry-delay 4 "$url?deployment=$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" -o "$RUNNER_TEMP/published.html"
           grep -Fq '大模型系统周报' "$RUNNER_TEMP/published.html"
           if grep -Fq 'class="cover-art"' "$RUNNER_TEMP/published.html"; then
-            cover=$(grep -oE 'assets/covers/[0-9]{4}-[0-9]{2}-[0-9]{2}-[a-f0-9]{12}\.webp' "$RUNNER_TEMP/published.html")
+            cover=$(grep -oE 'assets/covers/[0-9]{4}-[0-9]{2}-[0-9]{2}-[a-f0-9]{12}\.webp\?v=[a-f0-9]{10}' "$RUNNER_TEMP/published.html")
             curl -fsSL --retry 5 --retry-all-errors "${SITE%/}/$cover" -o "$RUNNER_TEMP/published.webp"
             python3 -c 'import sys; b=open(sys.argv[1],"rb").read(12); assert b[:4]==b"RIFF" and b[8:]==b"WEBP"' "$RUNNER_TEMP/published.webp"
           fi

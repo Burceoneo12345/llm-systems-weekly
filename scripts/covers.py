@@ -13,12 +13,14 @@ if stage == "brief":
     for cover in covers:
         messages = [
             {"role": "system", "content": (
-                "Art-direct a wordless cover for a computer systems journal. The user gives the lead in Chinese. "
-                "Reply with ONE 18–32 word English scene description. Translate the specific mechanism into concrete "
-                "visible objects doing something. If it compares alternatives, show their contrast. If it transfers or "
-                "routes data, show what moves and where. Pick a different visual subject for different mechanisms. "
-                "Avoid generic chips, labels, lettering, performance graphs and unsupported numerical claims. "
-                "Describe the scene directly, without a preamble or quotation marks."
+                "Art-direct a wordless illustrated engineering journal. Read the Chinese lead, then write ONE English "
+                "sentence of 18–32 words describing a tangible tabletop scene a photographer could stage in daylight. "
+                "Give it a recognizable physical object and one visible action that explains this specific mechanism. "
+                "For precision comparisons, picture the same shape printed by coarse and fine blocks. For cross-device "
+                "dispatch, picture parcels travelling between sorting trays. For synchronized routing, picture "
+                "parallel railway switches joined by a common lever. Invent other physical analogies for other leads. "
+                "No screens, circuitry, glowing nodes, light beams, data streams, people, writing or technical acronyms. "
+                "Return the scene directly."
             )},
             {"role": "user", "content": json.dumps({"headline": cover["title"], "summary": cover["summary"]}, ensure_ascii=False)}
         ]
@@ -39,9 +41,9 @@ elif stage == "render":
     from PIL import Image, ImageStat
 
     model_dir = snapshot_download(
-        "OpenVINO/LCM_Dreamshaper_v7-int8-ov", revision="340a03e5488f36f7f222e6efa29819850ad7e4be",
+        "OpenVINO/stable-diffusion-xl-base-1.0-int8-ov", revision="d54e5b43fcb6b4b358f3a134269115d3fcb3eb25",
         cache_dir=str(Path.home() / ".cache/weekly-illustration"), max_workers=3,
-        allow_patterns=["model_index.json", "scheduler/*", "tokenizer/*", "text_encoder/*",
+        allow_patterns=["model_index.json", "scheduler/*", "tokenizer*/*", "text_encoder*/*",
                         "unet/*", "vae_decoder/*", "vae_encoder/*"],
     )
     pipe = openvino_genai.Text2ImagePipeline(model_dir, "CPU")
@@ -51,12 +53,18 @@ elif stage == "render":
             continue
         path.parent.mkdir(parents=True, exist_ok=True)
         seed = int.from_bytes(hashlib.sha256(path.name.encode()).digest()[:4], "big")
-        prompt = (cover["scene"] + " Editorial linocut illustration, bold geometric forms, vermilion red, "
-                  "charcoal black and warm ivory ink, crisp silhouettes, textured paper, wordless print.")
-        result = pipe.generate(prompt, width=640, height=512, num_inference_steps=6, guidance_scale=7.5, rng_seed=seed)
-        image = Image.fromarray(result.data[0])
-        if image.size != (640, 512) or max(ImageStat.Stat(image).stddev) < 5:
-            raise ValueError(f"Cover generation produced an empty image for {path}")
+        palette = ("vermilion and charcoal", "forest green and amber", "ultramarine and copper", "terracotta and teal")[seed % 4]
+        prompt = (cover["scene"] + f" A bright editorial still life in {palette}. Bold hand-printed linocut, "
+                  "warm ivory paper background, intricate carved lines, generous light, clear object silhouettes.")
+        for attempt in range(2):
+            result = pipe.generate(prompt, negative_prompt="dark background, neon, abstract network, screens, text, letters, people, blur",
+                                   width=896, height=704, num_inference_steps=20, guidance_scale=6.5, rng_seed=seed + attempt)
+            image = Image.fromarray(result.data[0])
+            light = image.convert("L")
+            if ImageStat.Stat(light).stddev[0] >= 24 and sum(light.histogram()[150:]) > 0.06 * light.width * light.height:
+                break
+        else:
+            raise ValueError(f"Insufficient contrast or highlights for {path}")
         temporary = path.with_suffix(".tmp")
         image.save(temporary, "WEBP", quality=88, method=6)
         temporary.replace(path)

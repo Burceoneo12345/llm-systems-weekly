@@ -10,7 +10,7 @@ GitHub Actions 每周一、周五 09:00（Asia/Shanghai）启动。托管运行�
 
 中文摘要由云端 CPU 上的 Qwen3-8B 生成，模型权重按校验和缓存。每条摘要核对来源片段和数字，未经核实的生成内容退回原标题。仓库自带的 `GITHUB_TOKEN` 负责读取 GitHub 数据和提交周报。
 
-每次拉取产生有头条的新一期时，Qwen 根据头条的标题和摘要构思画面，GitHub 托管 CPU 用 LCM DreamShaper 生成专属 WebP 封面。图片按期号与头条标识存入 `assets/covers/`，历史周报引用各自的原图。更换头条会生成新图，重复部署会复用已归档的图片。[插画模型](https://huggingface.co/OpenVINO/LCM_Dreamshaper_v7-int8-ov)
+每次拉取产生有头条的新一期时，Qwen 根据头条的标题和摘要构思画面，GitHub 托管 CPU 用 Stable Diffusion XL 生成专属 WebP 封面。图片按期号与头条标识存入 `assets/covers/`，历史周报引用各自的原图。更换头条会生成新图，重复部署会复用已归档的图片。[插画模型](https://huggingface.co/OpenVINO/stable-diffusion-xl-base-1.0-int8-ov)
 
 工作流先构建看板，然后归档 Markdown 并在同一次运行中部署 Pages。再次运行同一期会保留原文。可以在 Actions 页面手动启动，也可以填写带时区的历史截止时间来补一段尚未收录的区间。[运行记录](https://github.com/Burceoneo12345/llm-systems-weekly/actions/workflows/pages.yml)
 
