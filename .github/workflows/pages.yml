@@ -1,8 +1,17 @@
-name: Publish weekly board
+name: 搜索研究进展并发布看板
+run-name: ${{ github.event_name == 'push' && '发布看板' || '检索论文与源码并发布' }}
 on:
   push:
     branches: [main]
+  schedule:
+    - cron: '0 9 * * 1,5'
+      timezone: Asia/Shanghai
   workflow_dispatch:
+    inputs:
+      cutoff:
+        description: '可选的历史截止时间，含时区。留空使用本次运行的创建时间。'
+        type: string
+        required: false
 
 permissions:
   contents: read
@@ -13,14 +22,58 @@ concurrency:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    permissions:
+      actions: read
+      contents: write
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: main
       - uses: actions/setup-node@v7
         with:
           node-version: 24
       - run: npm ci
+      - name: 检索论文、合并记录和版本发布
+        id: collect
+        if: github.event_name != 'push'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPORT_UNTIL: ${{ inputs.cutoff }}
+        run: |
+          if [[ -z "$REPORT_UNTIL" ]]; then
+            REPORT_UNTIL=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" --jq .created_at)
+          fi
+          python3 scripts/digest.py collect "$RUNNER_TEMP/sources.json" --until "$REPORT_UNTIL"
+      - name: 缓存中文摘要模型
+        if: steps.collect.outputs.path != '' && steps.collect.outputs.count != '0'
+        uses: actions/cache@v6
+        with:
+          path: ~/.cache/weekly-qwen3
+          key: weekly-qwen3-4b-q4km-7485fe6f
+      - name: 在 GitHub 托管 CPU 上撰写中文周报
+        if: steps.collect.outputs.path != ''
+        env:
+          ITEM_COUNT: ${{ steps.collect.outputs.count }}
+        run: |
+          if [[ "$ITEM_COUNT" = "0" ]]; then
+            python3 scripts/digest.py write "$RUNNER_TEMP/sources.json"
+          else
+            bash scripts/write-report.sh "$RUNNER_TEMP/sources.json"
+          fi
       - run: npm run build
+      - name: 将本期原文存入仓库
+        if: steps.collect.outputs.path != ''
+        env:
+          REPORT: ${{ steps.collect.outputs.path }}
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -- "$REPORT"
+          git commit -m "发布大模型系统周报 $(basename "$REPORT" .md)"
+          git push origin HEAD:main
       - uses: actions/upload-pages-artifact@v5
         with:
           path: _site
