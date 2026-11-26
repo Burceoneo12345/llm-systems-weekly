@@ -21,7 +21,11 @@ trap 'kill "$server_pid" 2>/dev/null || true' EXIT
 for _ in {1..90}; do
   if ! kill -0 "$server_pid" 2>/dev/null; then tail -40 "$runtime/server.log"; exit 1; fi
   if curl -fsS http://127.0.0.1:8089/health >/dev/null 2>&1; then
-    python3 scripts/digest.py write "$1"
+    if [[ -s "$1" ]] && jq -e '.items | length > 0' "$1" >/dev/null; then
+      python3 scripts/digest.py write "$1"
+    fi
+    node build.mjs --missing-covers > "$RUNNER_TEMP/covers.json"
+    python3 scripts/covers.py brief "$RUNNER_TEMP/covers.json"
     exit 0
   fi
   sleep 2

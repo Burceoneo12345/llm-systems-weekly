@@ -10,6 +10,8 @@ GitHub Actions 每周一、周五 09:00（Asia/Shanghai）启动。托管运行�
 
 中文摘要由云端 CPU 上的 Qwen3-8B 生成，模型权重按校验和缓存。每条摘要核对来源片段和数字，未经核实的生成内容退回原标题。仓库自带的 `GITHUB_TOKEN` 负责读取 GitHub 数据和提交周报。
 
+每次拉取产生有头条的新一期时，Qwen 根据头条的标题和摘要构思画面，GitHub 托管 CPU 用 LCM DreamShaper 生成专属 WebP 封面。图片按期号与头条标识存入 `assets/covers/`，历史周报引用各自的原图。更换头条会生成新图，重复部署会复用已归档的图片。[插画模型](https://huggingface.co/OpenVINO/LCM_Dreamshaper_v7-int8-ov)
+
 工作流先构建看板，然后归档 Markdown 并在同一次运行中部署 Pages。再次运行同一期会保留原文。可以在 Actions 页面手动启动，也可以填写带时区的历史截止时间来补一段尚未收录的区间。[运行记录](https://github.com/Burceoneo12345/llm-systems-weekly/actions/workflows/pages.yml)
 
 论文优先使用 arXiv 的版本元数据。对本期索引更新、提交时间早于上期截止的版本，在七天回看范围内单独注明「索引补录」。主接口不可用时可通过 Hugging Face Daily Papers 发现候选，再核对 arXiv 原文，并在当期说明覆盖范围。修订版的摘要概括当期可见的研究内容。
@@ -20,7 +22,7 @@ GitHub Actions 每周一、周五 09:00（Asia/Shanghai）启动。托管运行�
 
 在 `reports/` 下新增 `YYYY-MM-DD.md`，使用北京时间截止日期命名。一级标题下写覆盖区间。每个二级标题下的一行代码标签依次表示日期、来源、状态和一个或多个主题。第一条自动成为本期首读，实验表格与补充源码可在看板展开。「本周跟进」收录验证问题。[编排示例](reports/2026-11-26.md)
 
-使用 Node.js 24 或更高版本在本地构建。
+手动新增一期后，推送到 `main` 会自动补齐封面。可用 `node build.mjs --missing-covers` 查看待生成的头条。拉取已归档的封面后，使用 Node.js 24 或更高版本在本地构建。
 
 ```sh
 npm ci

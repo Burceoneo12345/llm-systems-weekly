@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { copyFileSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { marked } from "marked";
 
@@ -55,9 +55,21 @@ for (const file of files) {
     const kind = status === "已合并" ? "PR" : source === "arXiv" ? "论文" : status.includes("发布") ? "版本发布" : "";
     Object.assign(story, { date, source, status, topics, kind });
   }
+  const lead = issue.stories[0];
+  if (lead) {
+    const source = lead.body.at(-1)?.tokens?.find(token => token.type === "link")?.href ?? "";
+    const key = createHash("sha256").update(JSON.stringify([issue.date, lead.title, source])).digest("hex").slice(0, 12);
+    issue.cover = { file: `assets/covers/${issue.date}-${key}.webp`, title: lead.title,
+      summary: lead.body.find(token => token.type === "paragraph")?.text ?? "" };
+  }
   issues.push(issue);
 }
 if (!issues.length) throw new Error("reports/ 下需要至少一期按截止日期命名的周报");
+if (process.argv[2] === "--missing-covers") {
+  const pending = issues.map(issue => issue.cover).filter(cover => cover && !existsSync(cover.file));
+  writeFileSync(1, JSON.stringify(pending));
+  process.exit(0);
+}
 
 function page(title, root, active, content) {
   const nav = [["issue", "本期周报", ""], ["archive", "历史归档", "archive/"], ["prompt", "周报提示词", "prompt/"]];
@@ -102,7 +114,7 @@ function issuePage(issue, root, latest) {
         <div class="cover-copy"><div class="credit"><b>本期首读</b><span>${escape(story.source)}</span><span>${escape(story.status)}</span></div>
         <h2>${title}</h2><div class="dek">${lead}</div>
         <div class="cover-actions">${linkHTML.length ? `<a class="primary-link" href="${escape(links[0].href)}">${story.source === "arXiv" ? "阅读原论文" : story.status === "已合并" ? "阅读合并记录" : "阅读原文"}</a>` : ""}${evidence}</div></div>
-        <figure class="cover-art"><img src="${root}assets/compute-cover.webp" width="960" height="960" alt="朱红底色上分层叠置的计算芯片版画" fetchpriority="high"></figure>
+        <figure class="cover-art"><img src="${root}${issue.cover.file}" width="640" height="512" alt="${escape(story.title)}的主题插画" fetchpriority="high"></figure>
       </article>`;
     }
     const sources = linkHTML.length ? `<div class="sources">${linkHTML.join("")}</div>` : "";
@@ -129,8 +141,11 @@ function issuePage(issue, root, latest) {
 }
 
 const assetVersion = createHash("sha256").update(readFileSync("site.css")).update(readFileSync("filter.js")).digest("hex").slice(0, 10);
-mkdirSync(join(output, "assets"), { recursive: true });
+mkdirSync(join(output, "assets/covers"), { recursive: true });
 for (const asset of ["site.css", "filter.js", "assets/compute-cover.webp"]) copyFileSync(asset, join(output, asset));
+for (const {cover} of issues) {
+  if (cover) copyFileSync(cover.file, join(output, cover.file));
+}
 writePage("", issuePage(issues[0], "./", true));
 for (const issue of issues) writePage(`weeks/${issue.date}`, issuePage(issue, "../../", issue === issues[0]));
 const archive = issues.map(issue => `<li><a href="../weeks/${issue.date}/">
