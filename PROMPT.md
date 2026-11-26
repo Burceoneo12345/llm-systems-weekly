@@ -48,4 +48,10 @@ GitHub Actions 在北京时间周一、周五 09:00 启动，在托管运行器�
 
 发布前核对一手链接并执行 `npm ci`、`npm run build`。提交本期 Markdown 到 `main` 后检查 Pages 部署及本期链接。首页会展示最新一期，历史归档会保留每期原文。若检索完成且当周没有可核实的新进展，在覆盖区间下写明结果即可。
 
+## Codex 自动化回查
+
+读取 `main` 上最近一期周报，对照 `.github/workflows/pages.yml` 的北京时间排期、运行记录和 `reports/` 归档，核对上次检查以来到期的各期。已有归档就复用。已有任务排队或运行时，跟进到部署完成。遇临时故障，重试原运行。确认漏跑、该期区间尚未覆盖且没有检索排队或运行时，在 `main` 上将该期应截止的北京时间传入 `cutoff`，触发同一工作流补跑。
+
+打开每个新发布期次的 `weeks/YYYY-MM-DD/` 固定链接并核对覆盖区间。有头条时，检查它的一手来源和本期专属封面。在当前对话给出固定链接，用一句话说明最值得读的一条影响了哪项工程选择。遇到来源缺口或本期没有可核实的新进展时，按归档说明。
+
 [GitHub Pages 看板](https://burceoneo12345.github.io/llm-systems-weekly/) · [源码仓库](https://github.com/Burceoneo12345/llm-systems-weekly)
