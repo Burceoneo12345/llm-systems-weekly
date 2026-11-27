@@ -27,6 +27,7 @@ REPOSITORIES = {
     "ROCm/rocm-libraries": "ROCm Libraries",
     "ROCm/composable_kernel": "Composable Kernel",
     "vllm-project/vllm": "vLLM",
+    "vllm-project/vllm-ascend": "vLLM Ascend",
     "sgl-project/sglang": "SGLang",
     "verl-project/verl": "verl",
     "OpenRLHF/OpenRLHF": "OpenRLHF",
