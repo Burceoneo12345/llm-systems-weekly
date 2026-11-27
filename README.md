@@ -8,7 +8,7 @@
 
 GitHub Actions 每周一、周五 09:00（Asia/Shanghai）启动。论文从本期截止日向前回看一年。定时和手动检索都从当前的 `PROMPT.md` 读取优先会刊、arXiv 分类和关键词。上游仓库的合并记录与版本发布从上一期截止时间开始检索。仓库来源包括 PyTorch、TorchAO、Transformers、TRL、FlashInfer、FlashAttention、Triton、DeepSpeed，GPTQModel、bitsandbytes、AutoRound 等量化工具链，以及 NVIDIA、AMD 的 kernel 与推理、RL 框架。去重后每期 30 条，代码与论文各 15 条。一方候选不足时先补该方排名靠后的候选，再用另一方补足，并在当期注明。标题含低精度或 RL 训练关键词的未合并 PR 每期至多收录一条并放在末尾，标注为尚未合入的提案。[查看跟踪仓库](scripts/upstream.py) · [检索方法](PROMPT.md#检索方法)
 
-中文摘要由云端 CPU 上的 Qwen3-8B 生成，模型权重按校验和缓存。每条摘要核对来源片段和数字，未经核实的生成内容退回原标题。仓库自带的 `GITHUB_TOKEN` 负责读取 GitHub 数据和提交周报。
+自动出刊时，GitHub 托管 CPU 上的 Qwen3-8B 生成中文摘要，模型权重按校验和缓存。每条摘要核对来源片段和数字，未经核实的生成内容退回原标题。仓库自带的 `GITHUB_TOKEN` 负责读取 GitHub 数据和提交周报。
 
 每次拉取产生有头条的新一期时，Qwen 根据头条的标题和摘要构思画面，GitHub 托管 CPU 用 Stable Diffusion XL 生成专属 WebP 封面。图片按期号与头条标识存入 `assets/covers/`，历史周报引用各自的原图。更换头条会生成新图，重复部署会复用已归档的图片。[插画模型](https://huggingface.co/OpenVINO/stable-diffusion-xl-base-1.0-int8-ov)
 
@@ -20,9 +20,9 @@ GitHub Actions 每周一、周五 09:00（Asia/Shanghai）启动。论文从本�
 
 ## 手动编写
 
-在 `reports/` 下新增 `YYYY-MM-DD.md`，使用北京时间截止日期命名。一级标题下写覆盖区间。每个二级标题下的一行代码标签依次表示日期、来源、状态和一个或多个主题。第一条自动成为本期首读，实验表格与补充源码可在看板展开。「本周跟进」收录验证问题。[编排示例](reports/2026-11-26.md)
+在 `reports/` 下新增 `YYYY-MM-DD.md`，使用北京时间截止日期命名。一级标题下写覆盖区间。每个二级标题下的一行代码标签依次表示日期、来源、状态和一个或多个主题。第一条自动成为本期首读，实验表格与补充源码可在看板展开。「本周跟进」收录验证问题。[已发布的 Markdown 原文](reports/)
 
-手动新增一期后，推送到 `main` 会自动补齐封面。可用 `node build.mjs --missing-covers` 查看待生成的头条。拉取已归档的封面后，使用 Node.js 24 或更高版本在本地构建。
+在 Codex 对话中出刊时，Codex 根据一手资料直接撰写摘要，并将 Markdown 和头条封面一起提交。只提交 Markdown 时，推送到 `main` 会自动补齐封面。可用 `node build.mjs --missing-covers` 查看待生成的头条。拉取已归档的封面后，使用 Node.js 24 或更高版本在本地构建。
 
 ```sh
 npm ci
