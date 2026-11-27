@@ -52,7 +52,7 @@ for (const file of files) {
     if (!datePattern.test(date) || !source || !status || !topics.length || !story.body.length) {
       throw new Error(`${file}「${story.title}」缺少日期、来源、状态、主题或正文`);
     }
-    const kind = status === "已合并" ? "PR" : status === "未合并" ? "待合并 PR" : source === "arXiv" ? "论文" : status.includes("发布") ? "版本发布" : "";
+    const kind = status === "已合并" ? "PR" : status === "未合并" ? "待合并 PR" : source === "arXiv" || status.endsWith("论文") ? "论文" : status.includes("发布") ? "版本发布" : "";
     Object.assign(story, { date, source, status, topics, kind });
   }
   const lead = issue.stories[0];
@@ -113,7 +113,7 @@ function issuePage(issue, root, latest) {
       return `<article class="cover" ${attrs}>
         <div class="cover-copy"><div class="credit"><b>本期首读</b><span>${escape(story.source)}</span><span>${escape(story.status)}</span></div>
         <h2>${title}</h2><div class="dek">${lead}</div>
-        <div class="cover-actions">${linkHTML.length ? `<a class="primary-link" href="${escape(links[0].href)}">${story.source === "arXiv" ? "阅读原论文" : story.status === "已合并" ? "阅读合并记录" : story.status === "未合并" ? "阅读待合并 PR" : "阅读原文"}</a>` : ""}${evidence}</div></div>
+        <div class="cover-actions">${linkHTML.length ? `<a class="primary-link" href="${escape(links[0].href)}">${story.kind === "论文" ? "阅读原论文" : story.status === "已合并" ? "阅读合并记录" : story.status === "未合并" ? "阅读待合并 PR" : "阅读原文"}</a>` : ""}${evidence}</div></div>
         <figure class="cover-art"><img src="${root}${issue.cover.file}?v=${issue.cover.version}" width="896" height="704" alt="${escape(story.title)}的主题插画" fetchpriority="high"></figure>
       </article>`;
     }

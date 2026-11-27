@@ -12,7 +12,7 @@ from urllib.parse import urlsplit
 from urllib.request import Request, urlopen
 from zoneinfo import ZoneInfo
 
-from papers import collect_papers, hardware_kernel
+from papers import AnnualPaperWarning, PUBLISHERS, collect_papers, hardware_kernel, paper_key, paper_since
 from search_prompt import KEYWORDS, PROMPT_PATH
 from upstream import collect_upstream, source_link
 
@@ -43,13 +43,17 @@ def parsed(value):
     return result
 
 
+def is_paper(item):
+    return item["source"] == "arXiv" or item["status"].endswith(("会议论文", "期刊论文"))
+
+
 def rank(item):
     title = item["title"].replace("_", " ")
     details = title + " " + item["body"][:1200]
     topics = [name for name, pattern in TOPICS.items() if re.search(pattern, details, re.I)]
     if item["source"] in {"vLLM", "SGLang", "FlashInfer", "TensorRT-LLM"} and "训练" in topics and not re.search(TOPICS["训练"], title, re.I):
         topics.remove("训练")
-    if item["source"] == "arXiv" and not SCOPE.search(details):
+    if is_paper(item) and not SCOPE.search(details):
         if not hardware_kernel(details):
             return 0, topics
         if not topics:
@@ -82,7 +86,7 @@ def rank(item):
 
 def external_url(value):
     url = urlsplit(value)
-    return url.scheme == "https" and url.netloc in {"arxiv.org", "github.com"} and not re.search(r"[\s()<>]", value)
+    return url.scheme == "https" and url.netloc in PUBLISHERS | {"arxiv.org", "github.com"} and not re.search(r"[\s()<>]", value)
 
 
 ISSUE_SIZE = 10
@@ -90,11 +94,11 @@ STANDARD = 5  # score a candidate needs before the bar is relaxed to fill an iss
 
 
 def _ranked(group):
-    """Order one class: candidates at or above STANDARD first, then a turn per repository."""
+    """Prioritize CCF A papers, then rank by engineering score and rotate sources."""
     rest, counts, chosen, watched = list(group), {}, [], False
     while rest:
-        item = max(rest, key=lambda c: (c["score"] >= STANDARD, c["score"] - 8 * counts.get(c["source"], 0),
-                                        c["date"], c["url"]))
+        item = max(rest, key=lambda c: (bool(c.get("ccf_a")), c["score"] >= STANDARD,
+                                        c["score"] - 8 * counts.get(c["source"], 0), c["date"], c["url"]))
         rest.remove(item)
         # One open PR per issue; it moves to the end after selection.
         if item["status"] == "未合并":
@@ -114,13 +118,14 @@ def _halves(code, papers, room):
 
 def _select(pool, notes):
     """Fill an issue with half code and half papers, relaxing the bar only to reach ISSUE_SIZE."""
-    code, papers = [c for c in pool if c["source"] != "arXiv"], [c for c in pool if c["source"] == "arXiv"]
-    selected, code_left, papers_left = _halves(_ranked(code), _ranked(papers), ISSUE_SIZE)
+    code = _ranked(c for c in pool if not is_paper(c))
+    papers = _ranked(c for c in pool if is_paper(c))
+    selected, code_left, papers_left = _halves(code, papers, ISSUE_SIZE)
     if any(c["score"] < STANDARD for c in selected):
         notes.append("达到常规收录标准的条目不足十条，本期包含了排名靠后的候选。")
     if len(selected) < ISSUE_SIZE:
         # One class is exhausted: fill the remaining slots from the other, best first.
-        extra = sorted(code_left + papers_left, key=lambda c: (-c["score"], c["date"], c["url"]))
+        extra = papers_left or sorted(code_left, key=lambda c: (-c["score"], c["date"], c["url"]))
         taken = extra[:ISSUE_SIZE - len(selected)]
         selected += taken
         notes.append("论文或代码一方候选不足，本期未能做到各半。" if taken
@@ -136,6 +141,7 @@ def collect(bundle, until):
     edition = end.date().isoformat()
     archive = []
     seen = set()
+    archived_versions = {}
     for path in sorted(REPORTS.glob("????-??-??.md")):
         text = path.read_text()
         span = COVERAGE.search(text)
@@ -144,7 +150,13 @@ def collect(bundle, until):
         begin, stop = (datetime.strptime(t, TIME_FORMAT).replace(tzinfo=BEIJING) for t in span.groups())
         saved = re.search(r"^<!-- pending-sources (.+) -->$", text, re.M)
         archive.append((begin, stop, json.loads(saved[1]) if saved else {}))
-        seen.update(re.findall(r"\]\((https://[^)\s]+)\)", text))
+        for url in re.findall(r"\]\((https://[^)\s]+)\)", text):
+            key = paper_key(url)
+            version = re.search(r"v(\d+)(?:#|$)", url) if key.startswith("https://arxiv.org/abs/") else None
+            if version:
+                archived_versions[key] = max(archived_versions.get(key, 0), int(version[1]))
+            else:
+                seen.add(key)
     if (REPORTS / f"{edition}.md").exists():
         print(f"{edition} 已存在，保留已发布内容")
         return
@@ -153,7 +165,7 @@ def collect(bundle, until):
     pending = previous[2] if previous else {}
     if any(start < stop and end > begin for begin, stop, _ in archive):
         raise ValueError("所选时间与已有周报重叠")
-    sources = {"papers": (collect_papers, "arXiv 论文"), "github": (collect_upstream, "GitHub 合并记录与发布")}
+    sources = {"papers": (collect_papers, "论文"), "github": (collect_upstream, "GitHub 合并记录与发布")}
     starts = {key: parsed(pending[key]) if key in pending else start for key in sources}
     discovered, notes, unfinished, failures = [], [], {}, []
     with warnings.catch_warnings(record=True) as notices, ThreadPoolExecutor(max_workers=2) as pool:
@@ -174,23 +186,40 @@ def collect(bundle, until):
         for notice in notices:
             if issubclass(notice.category, UserWarning):
                 notes.append(str(notice.message))
-                unfinished["papers"] = starts["papers"].isoformat()
+                if not issubclass(notice.category, AnnualPaperWarning):
+                    unfinished["papers"] = starts["papers"].isoformat()
     if len(failures) == len(sources):
         raise RuntimeError("；".join(failures))
     for failure in failures:
         print(f"来源暂缺 {failure}")
     candidates = []
+    since = paper_since(end)
+    notes.insert(0, f"论文回看 {since:%Y-%m-%d} 至 {end:%Y-%m-%d}，优先收录 CCF 目录中的 A 类会议和 A 类期刊论文。")
+    # Prefer the published record when multiple sources return the same paper.
+    discovered.sort(key=lambda c: (bool(c.get("ccf_a")), "ccf_a" in c, c["date"]), reverse=True)
+    paper_titles = set()
     for item in discovered:
         event = parsed(item["date"])
-        source_start = starts["papers" if item["source"] == "arXiv" else "github"]
-        late_paper = item["source"] == "arXiv" and item.get("index_day") and event <= source_start
-        if (not late_paper and not source_start < event <= end) or item["url"] in seen or not external_url(item["url"]):
+        paper = is_paper(item)
+        in_window = since <= event <= end if paper else starts["github"] < event <= end
+        keys = {paper_key(item["url"])}
+        if item.get("preprint"):
+            keys.add(paper_key(item["preprint"]))
+        title = re.sub(r"[\W_]+", "", item["title"].casefold())
+        if not in_window or keys & seen or not external_url(item["url"]) or (paper and title in paper_titles):
             continue
-        seen.add(item["url"])
+        prior = max((archived_versions.get(key, 0) for key in keys), default=0)
+        if prior:
+            version = re.search(r"v(\d+)$", item["url"]) if item["source"] == "arXiv" else None
+            if not version or int(version[1]) <= prior:
+                continue
         score, topics = rank(item)
-        if late_paper:
+        if item.get("index_day"):
             score -= 3
         if score > 0:
+            seen.update(keys)
+            if paper:
+                paper_titles.add(title)
             candidates.append({**item, "score": score, "topics": topics})
     selected = _select(candidates, notes)
     for item in selected:
@@ -295,6 +324,8 @@ def write(bundle):
             parts.append(f"索引补录。此版本提交于 {date}（北京时间），arXiv 元数据的更新日期为 {item['index_day']}（UTC）。")
         kind = {"已合并": "合并记录", "未合并": "待合并 PR", "已发布": "版本发布"}.get(item["status"], "论文原文")
         links = [f"[{kind}]({item['url']})"]
+        if item.get("preprint"):
+            links.append(f"[预印本]({item['preprint']})")
         if item.get("code"):
             links.append(f"[固定提交源码]({item['code']})")
         parts.append(" · ".join(links))

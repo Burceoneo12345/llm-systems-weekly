@@ -6,7 +6,7 @@
 
 ## 自动更新
 
-GitHub Actions 每周一、周五 09:00（Asia/Shanghai）启动。定时和手动检索都从仓库当前的 `PROMPT.md` 读取 arXiv 分类和关键词表。托管运行器从上一期截止时间开始，扫描对应分类的论文，以及 25 个上游仓库的合并记录与版本发布，并用提示词中的关键词筛选候选。仓库来源包括 PyTorch、TorchAO、Transformers、TRL、FlashInfer、FlashAttention、Triton、DeepSpeed，GPTQModel、bitsandbytes、AutoRound 等量化工具链，以及 NVIDIA、AMD 的 kernel 与推理、RL 框架。去重后每期十条，代码与论文各五条；一方候选不足时先补该方排名靠后的候选，再用另一方补足，并在当期注明。标题含低精度或 RL 训练关键词的未合并 PR 每期至多收录一条并放在末尾，标注为尚未合入的提案。[查看跟踪仓库](scripts/upstream.py) · [检索方法](PROMPT.md#检索方法)
+GitHub Actions 每周一、周五 09:00（Asia/Shanghai）启动。论文从本期截止日向前回看一年。定时和手动检索都从当前的 `PROMPT.md` 读取优先会刊、arXiv 分类和关键词。上游仓库的合并记录与版本发布从上一期截止时间开始检索。仓库来源包括 PyTorch、TorchAO、Transformers、TRL、FlashInfer、FlashAttention、Triton、DeepSpeed，GPTQModel、bitsandbytes、AutoRound 等量化工具链，以及 NVIDIA、AMD 的 kernel 与推理、RL 框架。去重后每期十条，代码与论文各五条。一方候选不足时先补该方排名靠后的候选，再用另一方补足，并在当期注明。标题含低精度或 RL 训练关键词的未合并 PR 每期至多收录一条并放在末尾，标注为尚未合入的提案。[查看跟踪仓库](scripts/upstream.py) · [检索方法](PROMPT.md#检索方法)
 
 中文摘要由云端 CPU 上的 Qwen3-8B 生成，模型权重按校验和缓存。每条摘要核对来源片段和数字，未经核实的生成内容退回原标题。仓库自带的 `GITHUB_TOKEN` 负责读取 GitHub 数据和提交周报。
 
@@ -14,7 +14,7 @@ GitHub Actions 每周一、周五 09:00（Asia/Shanghai）启动。定时和手�
 
 工作流先构建看板，然后归档 Markdown 并在同一次运行中部署 Pages。再次运行同一期会保留原文。可以在 Actions 页面手动启动，也可以填写带时区的历史截止时间来补一段尚未收录的区间。[运行记录](https://github.com/Burceoneo12345/llm-systems-weekly/actions/workflows/pages.yml)
 
-论文优先使用 arXiv 的版本元数据。对本期索引更新、提交时间早于上期截止的版本，在七天回看范围内单独注明「索引补录」。主接口不可用时可通过 Hugging Face Daily Papers 发现候选，再核对 arXiv 原文，并在当期说明覆盖范围。修订版的摘要概括当期可见的研究内容。
+论文优先收录中国计算机学会（CCF）目录中的 A 类会议主会论文和 A 类期刊论文。通过 OpenAlex 的正式发表记录核对来源，链接到论文原文或 DOI。全年窗口也检索其他会刊论文和 arXiv 预印本。arXiv OAI-PMH 补充本期新增和修订，接口不可用时再通过 Hugging Face Daily Papers 补查。
 
 论文或 GitHub 有一方临时不可用时，当期仍可发布另一方已核实的进展，并记录缺口，下次补查。两方都不可用时保留上期截止时间。
 

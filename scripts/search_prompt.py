@@ -9,6 +9,12 @@ CATEGORIES = tuple(dict.fromkeys(re.findall(r"\b([a-z][a-z-]+)\.([A-Z]{2})\b", m
 if not CATEGORIES:
     raise ValueError("PROMPT.md 的检索方法缺少 arXiv 分类")
 
+venue_lines = re.findall(r"^- A 类(?:会议|期刊).*$", method, re.M)
+CCF_A_VENUES = {
+    source_id: label for label, source_id in
+    re.findall(r"\[([^\]\n]+)\]\(https://openalex\.org/(S\d+)\)", "\n".join(venue_lines))
+}
+
 rows = dict(re.findall(r"^\|[ \t]*([^|\n]+?)[ \t]*\|[ \t]*([^|\n]+?)[ \t]*\|[ \t]*$", method, re.M))
 KEYWORDS = {}
 for dimension in ("数值格式", "训练环节", "推理环节", "硬件与生态"):

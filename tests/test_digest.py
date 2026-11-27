@@ -48,3 +48,20 @@ class SourceCoverageTest(unittest.TestCase):
             with self.assertRaises(RuntimeError):
                 digest.collect(bundle, "2026-11-25T09:00:00+08:00")
             self.assertFalse(bundle.exists())
+
+    def test_yearly_search_skips_archived_versions_and_keeps_a_new_revision(self):
+        paper = {"url": "https://arxiv.org/abs/2603.00001v1", "title": "LLM inference quantization",
+                 "source": "arXiv", "status": "预印本 v1", "body": "Low-precision LLM inference.",
+                 "date": "2026-03-01T12:00:00Z"}
+        revised = dict(paper, url=paper["url"][:-1] + "3", status="修订版", date="2026-11-24T12:00:00Z")
+        other = dict(paper, url="https://arxiv.org/abs/2603.00002v1", title="Quantization for LLM serving")
+        with tempfile.TemporaryDirectory() as directory, patch.object(digest, "REPORTS", Path(directory)), \
+             patch.object(digest, "collect_papers", return_value=[paper, revised, other]), \
+             patch.object(digest, "collect_upstream", return_value=[]):
+            reports = Path(directory)
+            (reports / "2026-11-20.md").write_text(
+                "覆盖 2026-11-13 09:00 至 2026-11-20 09:00（北京时间）\n"
+                "[原文](https://arxiv.org/abs/2603.00001v2) · [原文](https://arxiv.org/abs/2603.00002v1)")
+            bundle = reports / "sources.json"
+            digest.collect(bundle, "2026-11-26T09:00:00+08:00")
+            self.assertEqual([item["url"] for item in json.loads(bundle.read_text())["items"]], [revised["url"]])

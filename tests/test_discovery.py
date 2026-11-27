@@ -41,6 +41,8 @@ class PaperRelevanceTest(unittest.TestCase):
             shutil.copytree(ROOT / "scripts", checkout / "scripts", ignore=shutil.ignore_patterns("__pycache__"))
             (checkout / "PROMPT.md").write_text(
                 "# 周报提示词\n\n## 检索方法\n\n论文扫描 cs.IR。\n"
+                "- A 类会议主会包括 [ExampleConf](https://openalex.org/S1234)。\n"
+                "其他来源包括 [OtherConf](https://openalex.org/S9999)。\n"
                 "| 维度 | 关键词 |\n| --- | --- |\n| 数值格式 | ExampleFormat |\n"
                 "| 训练环节 | example training |\n| 推理环节 | example serving |\n| 硬件与生态 | ExampleChip |\n"
             )
@@ -50,9 +52,20 @@ from unittest.mock import patch
 from urllib.parse import parse_qs, urlsplit
 import digest, papers, upstream
 
-with patch.object(papers, "_read", return_value=b'<OAI-PMH><error code="noRecordsMatch"/></OAI-PMH>') as api:
+def read(url):
+    if "api.openalex.org" in url:
+        return b'{"results":[]}'
+    if "export.arxiv.org" in url:
+        return b'<feed><totalResults>0</totalResults></feed>'
+    return b'<OAI-PMH><error code="noRecordsMatch"/></OAI-PMH>'
+with patch.object(papers, "_read", side_effect=read) as api:
     papers.collect_papers(datetime(2026, 1, 1, tzinfo=timezone.utc), datetime(2026, 1, 2, tzinfo=timezone.utc))
-assert [parse_qs(urlsplit(call.args[0]).query)["set"] for call in api.call_args_list] == [["cs:cs:IR"]]
+queries = [parse_qs(urlsplit(call.args[0]).query) for call in api.call_args_list]
+assert [q["set"] for q in queries if "set" in q] == [["cs:cs:IR"]]
+assert any("primary_location.source.id:S1234" in q.get("filter", [""])[0] for q in queries)
+assert "S9999" not in papers.CCF_A_VENUES
+assert all("from_publication_date:2025-01-02" in q["filter"][0] for q in queries if "filter" in q)
+assert any("cat:cs.IR" in q.get("search_query", [""])[0] and "202501020000" in q["search_query"][0] for q in queries)
 assert papers._relevant("ExampleFormat for LLMs", "")
 assert papers._relevant("GEMM kernels for ExampleChip", "")
 item = dict(title="Support ExampleFormat", source="PyTorch", status="已合并", date="2026-01-02",
@@ -62,6 +75,27 @@ assert "低精度" in digest.rank(item)[1]
 assert digest.rank(dict(item, title="GEMM kernels for ExampleChip", source="arXiv"))[0] > 0
 """
             subprocess.run([sys.executable, "-c", check], cwd=checkout / "scripts", check=True)
+
+    def test_publication_venue_and_date_come_from_the_published_record(self):
+        start, end = datetime(2025, 11, 26, tzinfo=timezone.utc), datetime(2026, 11, 26, tzinfo=timezone.utc)
+        title = "Quantization for LLM inference"
+        location = {"source": {"id": "https://openalex.org/S1", "type": "conference", "display_name": "TestConf"},
+                    "is_published": True, "raw_source_name": "TestConf", "landing_page_url": "https://doi.org/10.1234/paper"}
+        work = {"display_name": title, "publication_date": "2026-03-10", "primary_location": location,
+                "type": "conference-paper", "abstract_inverted_index": {"LLM": [0], "inference": [1]},
+                "locations": [{"landing_page_url": "http://arxiv.org/abs/2601.00001v2"}]}
+        workshop = {**location, "raw_source_name": "TestConf Workshops", "landing_page_url": "https://doi.org/10.1234/workshop"}
+        journal = {**location, "source": {"id": "https://openalex.org/S2", "type": "journal", "display_name": "TestJournal"},
+                   "landing_page_url": "https://doi.org/10.1234/journal"}
+        works = [work, dict(work, primary_location=workshop), dict(work, primary_location=journal, type="article"),
+                 dict(work, publication_date="2025-11-25", primary_location=dict(location, landing_page_url="https://doi.org/10.1234/old"))]
+        with patch.object(papers, "CCF_A_VENUES", {"S1": "TestConf", "S2": "TestJournal"}), \
+             patch.object(papers, "_read", return_value=json.dumps({"results": works}).encode()):
+            selected = papers._published_papers(start, end)
+        self.assertEqual([p["status"] for p in selected], ["CCF A 类会议论文", "会议论文", "CCF A 类期刊论文"])
+        self.assertEqual(selected[0]["preprint"], "https://arxiv.org/abs/2601.00001")
+        leap = datetime(2024, 2, 29, 9, tzinfo=timezone.utc)
+        self.assertEqual(papers.paper_since(leap), datetime(2023, 2, 28, tzinfo=timezone.utc))
 
 
 class OpenPullWatchListTest(unittest.TestCase):
@@ -227,6 +261,20 @@ class BalancedSelectionTest(unittest.TestCase):
         self.assertEqual(len(selected), 10)
         self.assertEqual(sum(item["source"] == "arXiv" for item in selected), 2)
         self.assertTrue(any("未能做到各半" in note for note in notes))
+
+    def test_annual_papers_prefer_ranked_venues_without_extending_the_code_window(self):
+        preprints = [self.paper(n, 20 + n) for n in range(8)]
+        published = dict(self.paper(8, 6), date="2025-11-26T00:00:00+08:00", status="CCF A 类期刊论文",
+                         url="https://doi.org/10.1234/annual", source="TPDS", ccf_a=True, preprint=preprints[7]["url"])
+        old = dict(published, date="2025-11-25T23:59:59+08:00", url="https://doi.org/10.1234/old", title="older")
+        future = dict(published, date="2026-11-26T09:01:00+08:00", url="https://doi.org/10.1234/future", title="future")
+        old_pr = dict(self.code(9, 100), date="2026-03-10T00:00:00Z")
+        selected, _ = self.select(preprints + [published, old, future, old_pr] + [self.code(n, 20) for n in range(5)])
+        links = [item["url"] for item in selected]
+        self.assertIn(published["url"], links)
+        self.assertEqual(len(links), 10)
+        for rejected in (preprints[7], old, future, old_pr):
+            self.assertNotIn(rejected["url"], links)
 
     def test_lower_ranked_candidates_fill_a_short_class_before_topping_up(self):
         items = ([self.code(n, 20 - n) for n in range(3)] + [self.paper(n, 17 - n) for n in range(3)]
