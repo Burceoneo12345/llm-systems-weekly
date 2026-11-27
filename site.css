@@ -28,10 +28,10 @@ button, a, summary { touch-action: manipulation; }
 .mark i { height: 1.18rem; background: var(--accent); }
 .mark i:nth-child(2) { height: 1.58rem; }
 .mark i:nth-child(3) { height: 1.95rem; }
-nav { display: flex; align-items: center; gap: clamp(.9rem, 2.2vw, 2.1rem); }
-nav a { font-size: .94rem; color: var(--muted); text-decoration: none; padding: .5rem 0; }
-nav a[aria-current] { color: var(--ink); font-weight: 680; text-decoration: underline; text-decoration-color: var(--accent); text-decoration-thickness: 2px; text-underline-offset: .58em; }
-nav .repo { padding-left: 1.3rem; border-left: 1px solid var(--hair); }
+.mast nav { display: flex; align-items: center; gap: clamp(.9rem, 2.2vw, 2.1rem); }
+.mast nav a { font-size: .94rem; color: var(--muted); text-decoration: none; padding: .5rem 0; }
+.mast nav a[aria-current] { color: var(--ink); font-weight: 680; text-decoration: underline; text-decoration-color: var(--accent); text-decoration-thickness: 2px; text-underline-offset: .58em; }
+.mast nav .repo { padding-left: 1.3rem; border-left: 1px solid var(--hair); }
 .folio, .folio-date { display: flex; align-items: center; }
 .folio { min-height: 3.65rem; justify-content: space-between; gap: .9rem; }
 .folio-date { gap: .8rem; }
@@ -39,6 +39,18 @@ nav .repo { padding-left: 1.3rem; border-left: 1px solid var(--hair); }
 .folio-date time { font-family: var(--serif); font-size: 1.2rem; font-weight: 680; font-variant-numeric: lining-nums tabular-nums; }
 .folio-date > span, .count, .coverage, .compact-coverage { color: var(--muted); font-size: .89rem; }
 .folio-date > span { padding-left: .8rem; border-left: 1px solid var(--hair); }
+.page-tools { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: .55rem 1rem; margin: .75rem 0 1.35rem; }
+.page-size { display: inline-flex; align-items: center; gap: .55rem; font-size: .9rem; color: var(--muted); }
+.page-size span { position: relative; }
+.page-size select { appearance: none; min-height: 2.75rem; padding: .35rem 1.8rem .35rem .7rem; border: 1px solid var(--hair); border-radius: .18rem; color: var(--ink); background: var(--paper); font: inherit; cursor: pointer; }
+.page-size span::after { content: ""; position: absolute; right: .7rem; top: 44%; width: .4rem; height: .4rem; border: solid var(--muted); border-width: 0 1.5px 1.5px 0; transform: rotate(45deg); pointer-events: none; }
+.pager { display: flex; flex-wrap: wrap; align-items: center; gap: .2rem; font-size: .94rem; font-variant-numeric: tabular-nums; }
+.pager > * { display: inline-grid; place-items: center; min-width: 2.5rem; min-height: 2.75rem; padding-inline: .45rem; border-radius: .18rem; text-decoration: none; }
+.pager a:hover { box-shadow: inset 0 0 0 1px var(--hair); }
+.pager a[aria-current] { background: var(--ink); color: var(--paper); font-weight: 680; }
+.pager [aria-disabled] { color: var(--muted); opacity: .65; }
+.pager-bottom { justify-content: center; margin-top: 1.5rem; }
+@media not print { .off-page { display: none !important; } }
 .cover { display: grid; grid-template-columns: minmax(0, 1.22fr) minmax(0, 1fr); align-items: center; gap: clamp(2rem, 5.8vw, 6rem); padding: .65rem 0 2.15rem; }
 .cover-copy { min-width: 0; padding-block: .5rem; }
 .credit { display: flex; flex-wrap: wrap; align-items: center; gap: .72rem; color: var(--muted); font-size: .89rem; }
@@ -71,7 +83,7 @@ code { font-size: .89em; color: #524135; background: #ece9e1; padding: .07em .23
 .rail-links a, .sources a, .compact-coverage a { color: var(--accent); font-size: .89rem; font-weight: 550; }
 .index-list { min-width: 0; }
 .entry { display: grid; grid-template-columns: minmax(6.3rem, .38fr) minmax(0, 2.2fr); gap: 1.05rem; padding: 1.35rem 0; border-bottom: 1px solid var(--hair); scroll-margin: 1rem; }
-.entry:first-of-type, .entry[hidden] + .entry { padding-top: 0; }
+.entry:first-of-type, .entry[hidden] + .entry, .entry.off-page + .entry:not(.off-page) { padding-top: 0; }
 .entry-byline { display: flex; flex-direction: column; align-items: flex-start; gap: .17rem; line-height: 1.45; color: var(--muted); font-size: .91rem; overflow-wrap: anywhere; }
 .entry-byline time { font: 650 1.05rem/1.3 var(--serif); font-variant-numeric: lining-nums tabular-nums; color: var(--ink); }
 .entry-byline small { font-size: .83rem; color: var(--muted); }
@@ -115,10 +127,10 @@ code { font-size: .89em; color: #524135; background: #ece9e1; padding: .07em .23
   .wrap { width: calc(100% - 2.2rem); }
   .mast-inner { min-height: auto; align-items: flex-start; flex-direction: column; gap: .15rem; padding-top: .85rem; }
   .brand { font-size: 1.55rem; }
-  nav { align-self: stretch; gap: 1.2rem; }
-  nav a { padding-block: .62rem; font-size: .91rem; }
-  nav a[aria-current] { text-underline-offset: .34em; }
-  nav .repo { border-left: 0; padding-left: 0; margin-left: auto; }
+  .mast nav { align-self: stretch; gap: 1.2rem; }
+  .mast nav a { padding-block: .62rem; font-size: .91rem; }
+  .mast nav a[aria-current] { text-underline-offset: .34em; }
+  .mast nav .repo { border-left: 0; padding-left: 0; margin-left: auto; }
   .folio { min-height: 3.25rem; }
   .folio-date { gap: .5rem; }
   .folio-date > span { padding-left: .5rem; }
@@ -143,9 +155,11 @@ code { font-size: .89em; color: #524135; background: #ece9e1; padding: .07em .23
 }
 @media (max-width: 26rem) {
   .folio-date > span { display: none; }
+  .pager { gap: .1rem; font-size: .875rem; }
+  .pager > * { min-width: 1.7rem; padding-inline: .25rem; }
 }
 @media print {
-  .mast nav, .count, .cover-actions .primary-link, .site-foot, .skip { display: none; }
+  .mast nav, .count, .page-tools, .pager-bottom, .cover-actions .primary-link, .site-foot, .skip { display: none; }
   .wrap { width: 100%; }
   .cover-art img { max-height: 12rem; object-fit: contain; }
   .entry { break-inside: avoid; }
