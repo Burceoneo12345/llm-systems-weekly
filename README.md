@@ -1,32 +1,33 @@
 # 大模型系统周报
 
-收录大模型训练、强化学习、推理、低精度，以及 NVIDIA 和 AMD 的论文与源码进展。每期都有固定链接和一份可在 GitHub 直接阅读的 Markdown 原文。
+面向昇腾 NPU 工程师，跟踪大模型训练、强化学习、推理与低精度的论文和上游实现。每期保留独立页面、Markdown 原文和当期头条封面。
 
 [打开看板](https://burceoneo12345.github.io/llm-systems-weekly/) · [历史归档](https://burceoneo12345.github.io/llm-systems-weekly/archive/) · [周报提示词](PROMPT.md)
 
-## 自动更新
+## 用 Codex 出刊
 
-GitHub Actions 每周一、周五 09:00（Asia/Shanghai）启动。论文从本期截止日向前回看一年。定时和手动检索都从当前的 `PROMPT.md` 读取优先会刊、arXiv 分类和关键词。上游仓库的合并记录与版本发布从上一期截止时间开始检索。仓库来源包括 PyTorch、TorchAO、Transformers、TRL、FlashInfer、FlashAttention、Triton、DeepSpeed，GPTQModel、bitsandbytes、AutoRound 等量化工具链，以及 NVIDIA、AMD 的 kernel 与推理、RL 框架。去重后每期 30 条，代码与论文各 15 条。一方候选不足时先补该方排名靠后的候选，再用另一方补足，并在当期注明。标题含低精度或 RL 训练关键词的未合并 PR 每期至多收录一条并放在末尾，标注为尚未合入的提案。[查看跟踪仓库](scripts/upstream.py) · [检索方法](PROMPT.md#检索方法)
+在仓库中打开 Codex，输入“按主分支 PROMPT.md 出本期周报，先给我本地预览”。周一、周五北京时间 09:00 截稿，手动出刊和定时出刊共用这份提示词。Codex 负责检索、核对原文、选头条和撰稿。论文回看一年，优先 CCF A 类会议主会和 A 类期刊。代码进展从上期截止时间接续，目标为论文和代码各 15 条。[完整出刊规则](PROMPT.md)
 
-自动出刊时，GitHub 托管 CPU 上的 Qwen3-8B 生成中文摘要，模型权重按校验和缓存。每条摘要核对来源片段和数字，未经核实的生成内容退回原标题。仓库自带的 `GITHUB_TOKEN` 负责读取 GitHub 数据和提交周报。
+1. 先检查 `reports/` 中已有期次。可用仓库的检索工具按指定截止时间生成候选 JSON。下例中的 `edition` 替换为到期的北京时间日期，GitHub 检索使用只读凭据。已在环境中设置 `GH_TOKEN` 或 `GITHUB_TOKEN` 时，可直接运行 Python 命令。
 
-每次拉取产生有头条的新一期时，Qwen 根据头条的标题和摘要构思画面，GitHub 托管 CPU 用 Stable Diffusion XL 生成专属 WebP 封面。图片按期号与头条标识存入 `assets/covers/`，历史周报引用各自的原图。更换头条会生成新图，重复部署会复用已归档的图片。[插画模型](https://huggingface.co/OpenVINO/stable-diffusion-xl-base-1.0-int8-ov)
+   ```sh
+   edition=YYYY-MM-DD
+   GH_TOKEN="$(gh auth token)" python3 scripts/digest.py collect "/tmp/weekly-$edition.json" \
+     --until "${edition}T09:00:00+08:00"
+   ```
 
-工作流先构建看板，然后归档 Markdown 并在同一次运行中部署 Pages。再次运行同一期会保留原文。可以在 Actions 页面手动启动，也可以填写带时区的历史截止时间来补一段尚未收录的区间。[运行记录](https://github.com/Burceoneo12345/llm-systems-weekly/actions/workflows/pages.yml)
+2. 阅读论文、PR 或 release 与固定提交源码，按证据选取并排序。在 `reports/YYYY-MM-DD.md` 写入覆盖区间、中文条目、一手链接和本周跟进问题。已有归档可作格式参考。[周报原文](reports/) · [上游仓库列表](scripts/upstream.py)
+3. 安装 Node.js 24 或更高版本，首次运行 `npm ci`。写好首读后运行 `node build.mjs --missing-covers`。Codex 对照首读的一手来源，用内置 ChatGPT Image（imagegen）画出可辨认的研究对象和关键操作。图内使用短标签，必要时在首读正文后用 `> 图注：…` 说明。将实际生成的图片转为 WebP，保存到清单指定的 `assets/covers/` 路径。新一期有头条就生成新图，首页和该期固定页共用它。无条目的检索记录可以直接构建。
 
-论文优先收录中国计算机学会（CCF）目录中的 A 类会议主会论文和 A 类期刊论文。通过 OpenAlex 的正式发表记录核对来源，链接到论文原文或 DOI。全年窗口也检索其他会刊论文和 arXiv 预印本。arXiv OAI-PMH 补充本期新增和修订，接口不可用时再通过 Hugging Face Daily Papers 补查。
+## 本地预览与发布
 
-论文或 GitHub 有一方临时不可用时，当期仍可发布另一方已核实的进展，并记录缺口，下次补查。两方都不可用时保留上期截止时间。
-
-## 手动编写
-
-在 `reports/` 下新增 `YYYY-MM-DD.md`，使用北京时间截止日期命名。一级标题下写覆盖区间。每个二级标题下的一行代码标签依次表示日期、来源、状态和一个或多个主题。第一条自动成为本期首读，实验表格与补充源码可在看板展开。「本周跟进」收录验证问题。[已发布的 Markdown 原文](reports/)
-
-在 Codex 对话中出刊时，Codex 根据一手资料直接撰写摘要，并将 Markdown 和头条封面一起提交。只提交 Markdown 时，推送到 `main` 会自动补齐封面。可用 `node build.mjs --missing-covers` 查看待生成的头条。拉取已归档的封面后，使用 Node.js 24 或更高版本在本地构建。
+在仓库根目录运行以下命令，然后打开 [本机预览](http://127.0.0.1:8000/)，查看首页及“本期固定链接”。
 
 ```sh
 npm ci
+python3 -m unittest discover -s tests
 npm run build
+python3 -m http.server 8000 --bind 127.0.0.1 --directory _site
 ```
 
-预览目录为 `_site/`。推送到 `main` 后，GitHub Actions 会构建并部署 GitHub Pages。
+需要本地审稿时，Markdown、图片与预览留在工作区。发布时将成稿和封面一起推送至 `main`，Pages 工作流校验、构建并部署该提交里的静态文件。出刊时间由 Codex 端的排程决定。[Pages 工作流](.github/workflows/pages.yml)

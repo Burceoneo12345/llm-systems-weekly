@@ -3,9 +3,13 @@ import re
 from pathlib import Path
 
 
-ISSUE_SIZE = 30
 PROMPT_PATH = Path(__file__).resolve().parents[1] / "PROMPT.md"
-method = PROMPT_PATH.read_text(encoding="utf-8").partition("\n## 检索方法\n")[2].split("\n## ", 1)[0]
+prompt = PROMPT_PATH.read_text(encoding="utf-8")
+size = re.search(r"每期\s*(\d+)\s*条", prompt.partition("\n## 如何筛选和写作\n")[2])
+if not size:
+    raise ValueError("PROMPT.md 的写作规则缺少每期目标条数")
+ISSUE_SIZE = int(size[1])
+method = prompt.partition("\n## 检索方法\n")[2].split("\n## ", 1)[0]
 CATEGORIES = tuple(dict.fromkeys(re.findall(r"\b([a-z][a-z-]+)\.([A-Z]{2})\b", method, re.ASCII)))
 if not CATEGORIES:
     raise ValueError("PROMPT.md 的检索方法缺少 arXiv 分类")

@@ -62,26 +62,31 @@ for (const file of files) {
   }
   const lead = issue.stories[0];
   if (lead) {
+    const caption = lead.body.find(token => token.type === "blockquote" && token.text.startsWith("图注："));
+    if (caption) lead.body = lead.body.filter(token => token !== caption);
     const source = lead.body.at(-1)?.tokens?.find(token => token.type === "link")?.href ?? "";
     const key = createHash("sha256").update(JSON.stringify([issue.date, lead.title, source])).digest("hex").slice(0, 12);
     issue.cover = { file: `assets/covers/${issue.date}-${key}.webp`, title: lead.title,
-      summary: lead.body.find(token => token.type === "paragraph")?.text ?? "" };
+      summary: lead.body.find(token => token.type === "paragraph")?.text ?? "", caption: caption?.text.slice(3).trim() ?? "" };
   }
   issue.note = issue.intro.find(token => token.type === "paragraph")?.text ?? "";
   issues.push(issue);
 }
 if (!issues.length) throw new Error("reports/ 下需要至少一期按截止日期命名的周报");
+const missingCovers = issues.map(issue => issue.cover).filter(cover => cover && !existsSync(cover.file));
 if (process.argv[2] === "--missing-covers") {
-  const pending = issues.map(issue => issue.cover).filter(cover => cover && !existsSync(cover.file));
-  writeFileSync(1, JSON.stringify(pending));
+  writeFileSync(1, JSON.stringify(missingCovers));
   process.exit(0);
+}
+if (missingCovers.length) {
+  throw new Error("缺少头条封面，请用 ChatGPT Image 生成并归档到\n" + missingCovers.map(cover => cover.file).join("\n"));
 }
 
 function page({ title, root, active, content, path = "", description = tagline, image, type = "website", script = false }) {
   const nav = [["issue", "本期周报", ""], ["archive", "历史归档", "archive/"], ["prompt", "周报提示词", "prompt/"]];
   const url = `${site}${path}`;
   const fullTitle = `${title} · 大模型系统周报`;
-  const graphic = image ? `<meta property="og:image" content="${image}"><meta property="og:image:width" content="896"><meta property="og:image:height" content="704">` : "";
+  const graphic = image ? `<meta property="og:image" content="${image}">` : "";
   return `<!doctype html>
 <html lang="zh-CN"><head>
   <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
@@ -106,7 +111,7 @@ function page({ title, root, active, content, path = "", description = tagline, 
     ).join("")}<a class="repo" href="${repository}">GitHub</a></nav>
   </div></header>
   <main id="main" class="wrap">${content}</main>
-  <footer class="wrap site-foot"><a href="${repository}/actions/workflows/pages.yml">周一、周五 09:00 更新（北京时间）</a><a href="${root}archive/">历期周报</a></footer>
+  <footer class="wrap site-foot"><a href="${root}prompt/">周一、周五 09:00 截稿（北京时间）</a><a href="${root}archive/">历期周报</a></footer>
 </body></html>`;
 }
 
@@ -146,7 +151,8 @@ function issuePage(issue, root, latest, path) {
         <div class="cover-copy"><div class="credit"><b>本期首读</b><span>${escape(story.source)}</span><span>${escape(story.status)}</span></div>
         <h2>${title}</h2><div class="dek">${lead}</div>
         <div class="cover-actions">${linkHTML.length ? `<a class="primary-link" href="${escape(links[0].href)}">${story.kind === "论文" ? "阅读原论文" : story.status === "已合并" ? "阅读合并记录" : story.status === "未合并" ? "阅读待合并 PR" : "阅读原文"}</a>` : ""}${evidence}</div></div>
-        <figure class="cover-art"><img src="${root}${issue.cover.file}?v=${issue.cover.version}" width="896" height="704" alt="" fetchpriority="high"></figure>
+        <figure class="cover-art"><img src="${root}${issue.cover.file}?v=${issue.cover.version}" width="896" height="704" alt="" fetchpriority="high">
+        ${issue.cover.caption ? `<figcaption>${escape(issue.cover.caption)}</figcaption>` : ""}</figure>
       </article>`;
     }
     const sources = linkHTML.length ? `<div class="sources">${linkHTML.join("")}</div>` : "";
@@ -156,7 +162,7 @@ function issuePage(issue, root, latest, path) {
       ${detail ? disclosure("展开技术细节", detail) : ""}
       ${sources}</div></article>`;
   });
-  const original = `${repository}/blob/main/reports/${issue.date}.md`;
+  const original = `${root}weeks/${issue.date}/${issue.date}.md`;
   const weekday = new Intl.DateTimeFormat("zh-CN", {weekday: "long", timeZone: "UTC"}).format(new Date(issue.date));
   const toc = issue.stories.slice(1).map((story, index) =>
     `<li data-for="item-${index + 2}"><a href="#item-${index + 2}">${marked.parseInline(story.title)}</a></li>`).join("");
@@ -173,7 +179,7 @@ function issuePage(issue, root, latest, path) {
       <div class="reading-rail"><h2>论文与源码</h2>
       <details class="toc" open><summary>本期目录</summary><ol>${toc}</ol></details>
       <p class="coverage">${escape(issue.coverage)}</p>
-      <div class="rail-links"><a href="${site}weeks/${issue.date}/">本期固定链接</a><a href="${original}">Markdown 原文</a></div></div>
+      <div class="rail-links"><a href="${root}weeks/${issue.date}/">本期固定链接</a><a href="${original}">Markdown 原文</a></div></div>
       <div class="index-list">${stories.slice(1).join("")}</div></section>` :
       `<div class="compact-coverage"><span>${escape(issue.coverage)}</span><a href="${original}">Markdown 原文</a><a href="${root}weeks/${issue.date}/">本期固定链接</a></div>`}
     ${issue.follow?.length ? `<section class="follow"><h2>本周跟进</h2>${rich(issue.follow)}</section>` : ""}
@@ -186,12 +192,21 @@ for (const asset of staticAssets) copyFileSync(asset, join(output, asset));
 for (const {cover} of issues) {
   if (cover) {
     const bytes = readFileSync(cover.file);
+    if (bytes.toString("ascii", 0, 4) !== "RIFF" || bytes.toString("ascii", 8, 12) !== "WEBP" ||
+        bytes.readUInt32LE(4) + 8 !== bytes.length ||
+        !["VP8 ", "VP8L", "VP8X"].includes(bytes.toString("ascii", 12, 16))) {
+      throw new Error(`${cover.file} 缺少有效的 WebP 文件头或文件不完整`);
+    }
     cover.version = createHash("sha256").update(bytes).digest("hex").slice(0, 10);
     writeFileSync(join(output, cover.file), bytes);
   }
 }
 writePage("", issuePage(issues[0], "./", true, `weeks/${issues[0].date}/`));
-for (const issue of issues) writePage(`weeks/${issue.date}`, issuePage(issue, "../../", issue === issues[0], `weeks/${issue.date}/`));
+for (const issue of issues) {
+  const path = `weeks/${issue.date}/`;
+  writePage(path, issuePage(issue, "../../", issue === issues[0], path));
+  copyFileSync(`reports/${issue.date}.md`, join(output, path, `${issue.date}.md`));
+}
 const archive = issues.map(issue => `<li><a href="../weeks/${issue.date}/">
   <time datetime="${issue.date}">${issue.date.replaceAll("-", ".")}</time>
   <strong>${marked.parseInline(issue.stories[0]?.title ?? "本期检索记录")}</strong>

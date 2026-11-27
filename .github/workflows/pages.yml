@@ -1,17 +1,7 @@
-name: 搜索研究进展并发布看板
-run-name: ${{ github.event_name == 'push' && '发布看板' || '检索论文与源码并发布' }}
+name: 校验并发布周报看板
 on:
   push:
     branches: [main]
-  schedule:
-    - cron: '0 9 * * 1,5'
-      timezone: Asia/Shanghai
-  workflow_dispatch:
-    inputs:
-      cutoff:
-        description: '可选的历史截止时间，含时区。留空使用本次运行的创建时间。'
-        type: string
-        required: false
 
 permissions:
   contents: read
@@ -22,101 +12,28 @@ concurrency:
 
 jobs:
   build:
-    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
-    timeout-minutes: 150
-    permissions:
-      actions: read
-      contents: write
     outputs:
-      report: ${{ steps.collect.outputs.path }}
+      edition: ${{ steps.build.outputs.edition }}
     steps:
       - uses: actions/checkout@v7
         with:
-          ref: main
-          fetch-depth: 0
+          persist-credentials: false
       - uses: actions/setup-node@v7
         with:
           node-version: 24
       - run: npm ci
-      - name: 检查单一来源发布与停机补检
-        run: python3 -m unittest discover -s tests
-      - name: 检索论文、合并记录和版本发布
-        id: collect
-        if: github.event_name != 'push'
-        env:
-          GH_TOKEN: ${{ github.token }}
-          REPORT_UNTIL: ${{ inputs.cutoff }}
+      - run: python3 -m unittest discover -s tests
+      - name: 构建已归档的周报和封面
+        id: build
         run: |
-          if [[ -z "$REPORT_UNTIL" ]]; then
-            REPORT_UNTIL=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" --jq .created_at)
-          fi
-          python3 scripts/digest.py collect "$RUNNER_TEMP/sources.json" --until "$REPORT_UNTIL"
-      - name: 检查新头条及待生成的封面
-        id: covers
-        env:
-          ITEM_COUNT: ${{ steps.collect.outputs.count }}
-        run: |
-          node build.mjs --missing-covers > "$RUNNER_TEMP/covers.json"
-          if [[ "$ITEM_COUNT" =~ ^[1-9][0-9]*$ ]] || jq -e 'length > 0' "$RUNNER_TEMP/covers.json" >/dev/null; then
-            echo 'needed=true' >> "$GITHUB_OUTPUT"
-          fi
-      - name: 缓存中文摘要模型
-        if: steps.covers.outputs.needed == 'true'
-        uses: actions/cache@v6
-        with:
-          path: ~/.cache/weekly-qwen3-8b
-          key: weekly-qwen3-8b-q4km-d98cdcbd
-      - name: 记录本期检索无新条目
-        if: steps.collect.outputs.path && steps.collect.outputs.count == '0'
-        run: python3 scripts/digest.py write "$RUNNER_TEMP/sources.json"
-      - name: 撰写周报并按头条设计封面
-        if: steps.covers.outputs.needed == 'true'
-        run: bash scripts/write-report.sh "$RUNNER_TEMP/sources.json"
-      - name: 缓存插画模型
-        if: steps.covers.outputs.needed == 'true'
-        uses: actions/cache@v6
-        with:
-          path: ~/.cache/weekly-illustration
-          key: weekly-cover-sdxl-d54e5b43
-      - name: 在托管 CPU 上生成每期独立的封面
-        if: steps.covers.outputs.needed == 'true'
-        env:
-          HF_HUB_DISABLE_XET: '1'
-          HF_HUB_DOWNLOAD_TIMEOUT: '120'
-        run: |
-          python3 -m venv "$RUNNER_TEMP/cover-env"
-          "$RUNNER_TEMP/cover-env/bin/pip" install --no-cache-dir openvino-genai==2026.4.1.0 huggingface-hub==0.36.0 Pillow==13.0.0
-          "$RUNNER_TEMP/cover-env/bin/python" scripts/covers.py render "$RUNNER_TEMP/covers.json"
-      - run: npm run build
-      - name: 将周报和对应封面存入仓库
-        if: steps.collect.outputs.path != '' || steps.covers.outputs.needed == 'true'
-        env:
-          REPORT: ${{ steps.collect.outputs.path }}
-        run: |
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          subject='生成周报头条封面'
-          if [[ -n "$REPORT" ]]; then
-            git add -- "$REPORT"
-            subject="发布大模型系统周报 $(basename "$REPORT" .md)"
-          fi
-          while IFS= read -r image; do git add -- "$image"; done < <(jq -r '.[].file' "$RUNNER_TEMP/covers.json")
-          git commit -m "$subject"
-          if ! git push origin HEAD:main; then
-            git fetch origin main
-            if ! git diff --quiet HEAD^ origin/main -- reports/ assets/covers/; then
-              echo "检索期间归档发生变动，需要基于新检索区间重跑。"
-              exit 1
-            fi
-            git rebase origin/main
-            npm ci
-            npm run build
-            git push origin HEAD:main
-          fi
+          npm run build
+          latest=$(git ls-files 'reports/????-??-??.md' | tail -n 1)
+          echo "edition=$(basename "$latest" .md)" >> "$GITHUB_OUTPUT"
       - uses: actions/upload-pages-artifact@v5
         with:
           path: _site
+
   publish:
     needs: build
     runs-on: ubuntu-latest
@@ -130,20 +47,19 @@ jobs:
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v5
-      - name: 检查已发布的页面
+      - name: 核对首页、当期固定链接与封面
         env:
           SITE: ${{ steps.deployment.outputs.page_url }}
-          REPORT: ${{ needs.build.outputs.report }}
+          EDITION: ${{ needs.build.outputs.edition }}
         run: |
           url="${SITE%/}/"
-          if [[ -n "$REPORT" ]]; then
-            url="${url}weeks/$(basename "$REPORT" .md)/"
-          fi
-          curl -fsSL --retry 5 --retry-all-errors --retry-delay 4 "$url?deployment=$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" -o "$RUNNER_TEMP/published.html"
-          grep -Fq '大模型系统周报' "$RUNNER_TEMP/published.html"
-          if grep -Fq 'class="cover-art"' "$RUNNER_TEMP/published.html"; then
-            cover=$(grep -oE 'assets/covers/[0-9]{4}-[0-9]{2}-[0-9]{2}-[a-f0-9]{12}\.webp\?v=[a-f0-9]{10}' "$RUNNER_TEMP/published.html")
-            curl -fsSL --retry 5 --retry-all-errors "${SITE%/}/$cover" -o "$RUNNER_TEMP/published.webp"
-            python3 -c 'import sys; b=open(sys.argv[1],"rb").read(12); assert b[:4]==b"RIFF" and b[8:]==b"WEBP"' "$RUNNER_TEMP/published.webp"
-          fi
-          printf '已发布 [大模型系统周报](%s)\n' "$url" >> "$GITHUB_STEP_SUMMARY"
+          html="$RUNNER_TEMP/published.html"
+          for page in "" "weeks/$EDITION/"; do
+            curl -fsSL --retry 5 --retry-all-errors --retry-delay 4 "${url}${page}?deployment=$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" -o "$html"
+            grep -Fq "<time datetime=\"$EDITION\">" "$html"
+            if grep -Fq 'class="cover-art"' "$html"; then
+              cover=$(grep -oE "assets/covers/$EDITION-[a-f0-9]{12}\.webp\?v=[a-f0-9]{10}" "$html")
+              curl -fsSL --retry 5 --retry-all-errors "$url$cover" -o "$RUNNER_TEMP/published.webp"
+              test "$(sha256sum "$RUNNER_TEMP/published.webp" | cut -c1-10)" = "${cover##*=}"
+            fi
+          done

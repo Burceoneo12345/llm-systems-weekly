@@ -81,6 +81,13 @@ query($owner: String!, $name: String!, $number: Int!, $after: String) {
 }"""
 
 
+def parsed(value):
+    result = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    if result.tzinfo is None:
+        raise ValueError("时间必须包含 UTC 或时区偏移")
+    return result
+
+
 def _github(document, **variables):
     token = os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN")
     if not token:
@@ -147,7 +154,7 @@ def _pulls(repo, start, end):
             for pr in page["nodes"]:
                 seen.add(pr["id"])
                 when = pr["mergedAt"]
-                if when and start < datetime.fromisoformat(when) <= end:
+                if when and start < parsed(when) <= end:
                     yield dict(id=pr["id"], title=pr["title"], url=pr["url"], date=when,
                                source=REPOSITORIES[repo], status="已合并")
             if not page["pageInfo"]["hasNextPage"]:
@@ -168,7 +175,7 @@ def _open_pulls(repo, start, end):
             continue
         page = _github(SEARCH, query=f"repo:{repo} is:pr is:open created:{bounds} " + " OR ".join(terms))["search"]
         for pr in page["nodes"]:
-            if pr["createdAt"] and start < datetime.fromisoformat(pr["createdAt"]) <= end and _watched(pr["title"]):
+            if pr["createdAt"] and start < parsed(pr["createdAt"]) <= end and _watched(pr["title"]):
                 found.setdefault(pr["id"], dict(id=pr["id"], title=pr["title"], url=pr["url"], date=pr["createdAt"],
                                                 source=REPOSITORIES[repo], status="未合并"))
     return sorted(found.values(), key=_rank, reverse=True)[:1]
@@ -198,7 +205,7 @@ def _commit_pulls(repo, start, end):
     while True:
         history = _github(HISTORY, owner=owner, name=name, after=after)["repository"]["defaultBranchRef"]["target"]["history"]
         for node in history["nodes"]:
-            when = datetime.fromisoformat(node["committedDate"])
+            when = parsed(node["committedDate"])
             oldest = when if oldest is None else min(oldest, when)
             change = re.search(r"\(#(\d+)\)$", node["messageHeadline"])
             if change and start < when <= end and int(change[1]) not in headlines:
@@ -229,7 +236,7 @@ def _releases(repo, start, end):
         page = result["releases"]
         for release in page["nodes"]:
             when = release["publishedAt"]
-            if not release["isDraft"] and when and start < datetime.fromisoformat(when) <= end:
+            if not release["isDraft"] and when and start < parsed(when) <= end:
                 title = release["name"] or release["tagName"]
                 if release["isPrerelease"]:
                     title += " (pre-release)"

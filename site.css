@@ -67,7 +67,8 @@ button, a, summary { touch-action: manipulation; }
 .dek p, .entry-dek p, .evidence-body p { margin: 0; text-wrap: pretty; }
 .evidence-body p { margin: .35rem 0 .65rem; }
 .cover-art { margin: 0; align-self: start; }
-.cover-art img { display: block; width: 100%; height: auto; aspect-ratio: 1.28; object-fit: cover; }
+.cover-art img { display: block; width: 100%; height: auto; }
+.cover-art figcaption { margin-top: .55rem; font-size: .87rem; line-height: 1.55; color: var(--muted); }
 .cover-actions { display: flex; flex-wrap: wrap; align-items: baseline; gap: .65rem 1.35rem; margin-top: 1.35rem; }
 .primary-link { display: inline-flex; align-items: center; min-height: 2.6rem; padding: .42rem 1.1rem; background: var(--ink); color: var(--on-ink); text-decoration: none; font-size: .94rem; font-weight: 650; border-radius: .18rem; }
 .primary-link:hover { background: var(--accent); color: var(--on-ink); }
@@ -146,7 +147,6 @@ code { font-size: .89em; color: var(--code-ink); background: var(--surface-2); p
   .folio-date > span { padding-left: .5rem; }
   .cover { grid-template-columns: minmax(0,1fr); gap: .9rem; padding: .2rem 0 1.25rem; }
   .cover-art { grid-row: 1; }
-  .cover-art img { aspect-ratio: 1.9; object-position: center; }
   .cover h2 { font-size: clamp(2rem, 7.5vw, 2.8rem); margin: .55rem 0 .65rem; }
   .cover-copy { padding-block: .1rem; }
   .dek { line-height: 1.75; }

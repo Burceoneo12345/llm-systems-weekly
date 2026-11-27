@@ -1,5 +1,4 @@
 import json
-import os
 import shutil
 import subprocess
 import sys
@@ -45,12 +44,15 @@ class PaperRelevanceTest(unittest.TestCase):
                 "其他来源包括 [OtherConf](https://openalex.org/S9999)。\n"
                 "| 维度 | 关键词 |\n| --- | --- |\n| 数值格式 | ExampleFormat |\n"
                 "| 训练环节 | example training |\n| 推理环节 | example serving |\n| 硬件与生态 | ExampleChip |\n"
+                "\n## 如何筛选和写作\n\n1. 每期 8 条，代码与论文各 4 条。\n"
             )
             check = """
 from datetime import datetime, timezone
 from unittest.mock import patch
 from urllib.parse import parse_qs, urlsplit
 import digest, papers, upstream
+
+assert digest.ISSUE_SIZE == upstream.ISSUE_SIZE == 8
 
 def read(url):
     if "api.openalex.org" in url:
@@ -195,39 +197,15 @@ class OpenPullSelectionTest(unittest.TestCase):
         self.assertLess(digest.rank(first)[0], digest.rank(dict(first, status="已合并"))[0])
         with tempfile.TemporaryDirectory() as directory:
             bundle = Path(directory) / "sources.json"
-            with patch.object(digest, "REPORTS", Path(directory)), patch.dict(digest.os.environ, {"GITHUB_OUTPUT": ""}), \
+            with patch.object(digest, "REPORTS", Path(directory)), \
                  patch.object(digest, "collect_papers", return_value=[]), \
                  patch.object(digest, "collect_upstream", return_value=[second, first, merged]), \
                  patch.object(digest, "source_link", return_value=""):
                 digest.collect(bundle, "2026-11-26T09:00:00+08:00")
+            self.assertEqual(list(Path(directory).glob("*.md")), [])
             selected = json.loads(bundle.read_text())["items"]
         self.assertEqual([entry["status"] for entry in selected], ["已合并", "未合并"])
         self.assertEqual(selected[0]["url"], merged["url"])
-
-    def test_write_labels_open_pulls_and_keeps_search_method_out_of_the_model_prompt(self):
-        item = {"url": "https://github.com/vllm-project/vllm/pull/2", "title": "NVFP4 backend",
-                "source": "vLLM", "status": "未合并", "body": "", "date": "2026-11-24T18:00:00Z",
-                "topics": ["低精度", "推理"]}
-        data = {"date": "2026-11-26", "start": "2026-11-20 09:00", "end": "2026-11-26 09:00",
-                "items": [item], "notes": [], "pending": {}}
-        previous = os.getcwd()
-        os.chdir(ROOT)
-        try:
-            with tempfile.TemporaryDirectory() as directory:
-                bundle = Path(directory) / "sources.json"
-                bundle.write_text(json.dumps(data))
-                with patch.object(digest, "REPORTS", Path(directory)), \
-                     patch.object(digest, "summarize", return_value={"title": "待合并的后端", "summary": "提案", "question": ""}) as model:
-                    digest.write(bundle)
-                text = (Path(directory) / "2026-11-26.md").read_text()
-        finally:
-            os.chdir(previous)
-        self.assertIn("`未合并`", text)
-        self.assertIn("[待合并 PR](https://github.com/vllm-project/vllm/pull/2)", text)
-        instructions = model.call_args.args[1]
-        self.assertIn("## 追踪范围", instructions)
-        self.assertIn("## 如何筛选和写作", instructions)
-        self.assertNotIn("检索方法", instructions)
 
 
 class BalancedSelectionTest(unittest.TestCase):
@@ -244,7 +222,7 @@ class BalancedSelectionTest(unittest.TestCase):
     def select(self, items):
         with tempfile.TemporaryDirectory() as directory:
             bundle = Path(directory) / "sources.json"
-            with patch.object(digest, "REPORTS", Path(directory)), patch.dict(digest.os.environ, {"GITHUB_OUTPUT": ""}), \
+            with patch.object(digest, "REPORTS", Path(directory)), \
                  patch.object(digest, "collect_papers", return_value=[]), \
                  patch.object(digest, "collect_upstream", return_value=items), \
                  patch.object(digest, "source_link", return_value=""), \
