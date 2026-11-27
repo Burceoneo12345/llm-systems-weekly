@@ -12,7 +12,7 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import quote
 from urllib.request import Request, urlopen
 
-from search_prompt import KEYWORDS
+from search_prompt import ISSUE_SIZE, KEYWORDS
 
 
 REPOSITORIES = {
@@ -207,7 +207,7 @@ def _commit_pulls(repo, start, end):
         if oldest is not None and oldest <= start or not history["pageInfo"]["hasNextPage"]:
             break
         after = history["pageInfo"]["endCursor"]
-    chosen = sorted(headlines.items(), key=lambda entry: _rank(entry[1]), reverse=True)[:10]
+    chosen = sorted(headlines.items(), key=lambda entry: _rank(entry[1]), reverse=True)[:ISSUE_SIZE]
     if not chosen:
         return
     fields = " ".join(f"p{number}: pullRequest(number: {number}) {{ id title url mergedAt }}" for number, _ in chosen)
@@ -318,7 +318,7 @@ def collect_upstream(start, end):
         try:
             feed = _commit_pulls if repo in COMMIT_FEED else _pulls
             pulls = {item["url"]: item for item in feed(repo, start, end)}
-            for item in sorted(pulls.values(), key=_rank, reverse=True)[:10]:
+            for item in sorted(pulls.values(), key=_rank, reverse=True)[:ISSUE_SIZE]:
                 candidates[item["id"]] = item
             for item in _open_pulls(repo, start, end):
                 candidates.setdefault(item["id"], item)

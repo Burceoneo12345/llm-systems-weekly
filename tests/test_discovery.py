@@ -99,6 +99,18 @@ assert digest.rank(dict(item, title="GEMM kernels for ExampleChip", source="arXi
 
 
 class OpenPullWatchListTest(unittest.TestCase):
+    def test_one_active_repository_can_supply_a_full_issue(self):
+        repo = "vllm-project/vllm"
+        pulls = [{"id": str(n), "title": f"LLM quantization {n}", "url": f"https://github.com/{repo}/pull/{n}",
+                  "date": "2026-11-24T18:00:00Z", "source": "vLLM", "status": "已合并"} for n in range(35)]
+        with patch.dict(upstream.REPOSITORIES, {repo: "vLLM"}, clear=True), \
+             patch.object(upstream, "_pulls", return_value=pulls), patch.object(upstream, "_open_pulls", return_value=[]), \
+             patch.object(upstream, "_releases", return_value=[]), \
+             patch.object(upstream, "_github", side_effect=lambda query, ids: {"nodes": [{"id": i, "bodyText": ""} for i in ids]}):
+            candidates = upstream.collect_upstream(datetime(2026, 11, 23, tzinfo=timezone.utc),
+                                                   datetime(2026, 11, 25, tzinfo=timezone.utc))
+        self.assertEqual(len(candidates), 30)
+
     def test_title_must_name_a_format_or_training_path(self):
         for title in ("Add NVFP4 W4A16 MoE backend", "Async GRPO rollout with weight sync",
                       "Fix FP8 dequantization in the PPO actor"):
@@ -241,13 +253,13 @@ class BalancedSelectionTest(unittest.TestCase):
             data = json.loads(bundle.read_text())
         return data["items"], data["notes"]
 
-    def test_ten_stories_split_evenly_with_the_best_first(self):
-        code = [self.code(n, 20 - n) for n in range(8)]
+    def test_thirty_stories_split_evenly_with_the_best_first(self):
+        code = [self.code(n, 50 - n) for n in range(20)]
         code[0]["status"], code[1]["status"] = "未合并", "未合并"
-        papers = [self.paper(n, 12 - n) for n in range(8)]
+        papers = [self.paper(n, 35 - n) for n in range(20)]
         selected, notes = self.select(code + papers)
-        self.assertEqual(len(selected), 10)
-        self.assertEqual(sum(item["source"] == "arXiv" for item in selected), 5)
+        self.assertEqual(len(selected), 30)
+        self.assertEqual(sum(item["source"] == "arXiv" for item in selected), 15)
         # Both open PRs outscore the merged work, yet only the first is kept and it goes last.
         self.assertEqual(selected[0]["url"], "https://github.com/vllm-project/vllm/pull/2")
         self.assertEqual(selected[-1]["url"], "https://github.com/vllm-project/vllm/pull/0")
@@ -257,36 +269,36 @@ class BalancedSelectionTest(unittest.TestCase):
         self.assertFalse(any("不足" in note for note in notes))
 
     def test_short_class_is_topped_up_from_the_other_and_noted(self):
-        selected, notes = self.select([self.paper(1, 15), self.paper(2, 14)] + [self.code(n, 20 - n) for n in range(12)])
-        self.assertEqual(len(selected), 10)
+        selected, notes = self.select([self.paper(1, 15), self.paper(2, 14)] + [self.code(n, 50 - n) for n in range(32)])
+        self.assertEqual(len(selected), 30)
         self.assertEqual(sum(item["source"] == "arXiv" for item in selected), 2)
         self.assertTrue(any("未能做到各半" in note for note in notes))
 
     def test_annual_papers_prefer_ranked_venues_without_extending_the_code_window(self):
-        preprints = [self.paper(n, 20 + n) for n in range(8)]
-        published = dict(self.paper(8, 6), date="2025-11-26T00:00:00+08:00", status="CCF A 类期刊论文",
-                         url="https://doi.org/10.1234/annual", source="TPDS", ccf_a=True, preprint=preprints[7]["url"])
+        preprints = [self.paper(n, 20 + n) for n in range(18)]
+        published = dict(self.paper(18, 6), date="2025-11-26T00:00:00+08:00", status="CCF A 类期刊论文",
+                         url="https://doi.org/10.1234/annual", source="TPDS", ccf_a=True, preprint=preprints[-1]["url"])
         old = dict(published, date="2025-11-25T23:59:59+08:00", url="https://doi.org/10.1234/old", title="older")
         future = dict(published, date="2026-11-26T09:01:00+08:00", url="https://doi.org/10.1234/future", title="future")
-        old_pr = dict(self.code(9, 100), date="2026-03-10T00:00:00Z")
-        selected, _ = self.select(preprints + [published, old, future, old_pr] + [self.code(n, 20) for n in range(5)])
+        old_pr = dict(self.code(19, 100), date="2026-03-10T00:00:00Z")
+        selected, _ = self.select(preprints + [published, old, future, old_pr] + [self.code(n, 20) for n in range(15)])
         links = [item["url"] for item in selected]
         self.assertIn(published["url"], links)
-        self.assertEqual(len(links), 10)
-        for rejected in (preprints[7], old, future, old_pr):
+        self.assertEqual(len(links), 30)
+        for rejected in (preprints[-1], old, future, old_pr):
             self.assertNotIn(rejected["url"], links)
 
     def test_lower_ranked_candidates_fill_a_short_class_before_topping_up(self):
-        items = ([self.code(n, 20 - n) for n in range(3)] + [self.paper(n, 17 - n) for n in range(3)]
-                 + [self.code(n, 3) for n in range(10, 14)] + [self.paper(n, 4) for n in range(10, 14)])
+        items = ([self.code(n, 40 - n) for n in range(13)] + [self.paper(n, 35 - n) for n in range(13)]
+                 + [self.code(n, 3) for n in range(20, 24)] + [self.paper(n, 4) for n in range(20, 24)])
         selected, notes = self.select(items)
-        self.assertEqual(len(selected), 10)
-        self.assertEqual(sum(item["source"] == "arXiv" for item in selected), 5)
+        self.assertEqual(len(selected), 30)
+        self.assertEqual(sum(item["source"] == "arXiv" for item in selected), 15)
         self.assertEqual(sum(item["score"] < digest.STANDARD for item in selected), 4)
-        self.assertTrue(any("排名靠后" in note for note in notes))
+        self.assertTrue(any("30 条" in note and "排名靠后" in note for note in notes))
         self.assertFalse(any("未能做到各半" in note for note in notes))
 
-    def test_fewer_than_ten_reports_what_exists(self):
+    def test_fewer_than_thirty_reports_what_exists(self):
         selected, notes = self.select([self.code(1, 9), self.paper(1, 9)])
         self.assertEqual(len(selected), 2)
         self.assertTrue(any("仅有 2 条" in note for note in notes))

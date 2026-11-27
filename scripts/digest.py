@@ -13,7 +13,7 @@ from urllib.request import Request, urlopen
 from zoneinfo import ZoneInfo
 
 from papers import AnnualPaperWarning, PUBLISHERS, collect_papers, hardware_kernel, paper_key, paper_since
-from search_prompt import KEYWORDS, PROMPT_PATH
+from search_prompt import ISSUE_SIZE, KEYWORDS, PROMPT_PATH
 from upstream import collect_upstream, source_link
 
 
@@ -89,7 +89,6 @@ def external_url(value):
     return url.scheme == "https" and url.netloc in PUBLISHERS | {"arxiv.org", "github.com"} and not re.search(r"[\s()<>]", value)
 
 
-ISSUE_SIZE = 10
 STANDARD = 5  # score a candidate needs before the bar is relaxed to fill an issue
 
 
@@ -121,8 +120,6 @@ def _select(pool, notes):
     code = _ranked(c for c in pool if not is_paper(c))
     papers = _ranked(c for c in pool if is_paper(c))
     selected, code_left, papers_left = _halves(code, papers, ISSUE_SIZE)
-    if any(c["score"] < STANDARD for c in selected):
-        notes.append("达到常规收录标准的条目不足十条，本期包含了排名靠后的候选。")
     if len(selected) < ISSUE_SIZE:
         # One class is exhausted: fill the remaining slots from the other, best first.
         extra = papers_left or sorted(code_left, key=lambda c: (-c["score"], c["date"], c["url"]))
@@ -130,6 +127,8 @@ def _select(pool, notes):
         selected += taken
         notes.append("论文或代码一方候选不足，本期未能做到各半。" if taken
                      else f"本期仅有 {len(selected)} 条可核实的进展。")
+    if any(c["score"] < STANDARD for c in selected):
+        notes.append(f"本期目标为 {ISSUE_SIZE} 条，收录了排名靠后的候选。")
     selected.sort(key=lambda c: (-c["score"], c["date"], c["url"]))
     return sorted(selected, key=lambda item: item["status"] == "未合并")
 

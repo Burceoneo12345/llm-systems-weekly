@@ -3,6 +3,7 @@ import re
 from pathlib import Path
 
 
+ISSUE_SIZE = 30
 PROMPT_PATH = Path(__file__).resolve().parents[1] / "PROMPT.md"
 method = PROMPT_PATH.read_text(encoding="utf-8").partition("\n## 检索方法\n")[2].split("\n## ", 1)[0]
 CATEGORIES = tuple(dict.fromkeys(re.findall(r"\b([a-z][a-z-]+)\.([A-Z]{2})\b", method, re.ASCII)))
