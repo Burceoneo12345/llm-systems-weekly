@@ -11,15 +11,17 @@ if (matches.length) {
   if (follow) follow.hidden = true;
 }
 
-const select = document.querySelector("#page-size");
-if (select && items.length) {
+const sizeSelects = document.querySelectorAll(".page-size select");
+if (sizeSelects.length && items.length) {
   const stories = matches.length ? matches : items;
-  const sizes = [...select.options].map(option => option.value);
-  const defaultSize = select.querySelector("[selected]").value;
+  const sizes = [...sizeSelects[0].options].map(option => option.value);
+  const defaultSize = sizeSelects[0].querySelector("[selected]").value;
   const size = sizes.includes(params.get("size")) ? params.get("size") : defaultSize;
   const perPage = size === "all" ? stories.length : Number(size);
   const pages = Math.ceil(stories.length / perPage);
-  document.querySelector(".page-tools").hidden = stories.length <= Number(sizes[0]);
+  for (const controls of document.querySelectorAll(".page-tools")) {
+    controls.hidden = stories.length <= Number(sizes[0]);
+  }
 
   function pageUrl(page, selectedSize) {
     const url = new URL(location.href);
@@ -43,7 +45,8 @@ if (select && items.length) {
     follow?.classList.toggle("off-page", page < pages);
     document.querySelector(".count").textContent = pages > 1
       ? `第 ${start + 1}–${end} 条，共 ${stories.length} 条` : `${stories.length} 条进展`;
-    select.value = size;
+    const status = document.querySelector(".page-status");
+    if (status) status.textContent = `第 ${page} 页，共 ${pages} 页`;
 
     const links = document.createDocumentFragment();
     const numbers = Array.from({ length: pages }, (_, i) => [i + 1, i + 1]);
@@ -64,8 +67,11 @@ if (select && items.length) {
     if (anchor >= 0) stories[anchor].scrollIntoView();
   }
 
-  select.addEventListener("change", () => location.assign(pageUrl(1, select.value)));
-  window.addEventListener("pageshow", () => { select.value = size; });
+  for (const select of sizeSelects) {
+    select.value = size;
+    select.addEventListener("change", () => location.assign(pageUrl(1, select.value)));
+    window.addEventListener("pageshow", () => { select.value = size; });
+  }
   window.addEventListener("hashchange", showPage);
   showPage();
 }

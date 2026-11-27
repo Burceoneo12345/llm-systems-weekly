@@ -49,7 +49,8 @@ button, a, summary { touch-action: manipulation; }
 .pager a:hover { box-shadow: inset 0 0 0 1px var(--hair); }
 .pager a[aria-current] { background: var(--ink); color: var(--paper); font-weight: 680; }
 .pager [aria-disabled] { color: var(--muted); opacity: .65; }
-.pager-bottom { justify-content: center; margin-top: 1.5rem; }
+#pagination-bottom { margin-top: 1.5rem; }
+.page-status { margin-inline-end: auto; color: var(--muted); font-size: .9rem; font-variant-numeric: tabular-nums; }
 @media not print { .off-page { display: none !important; } }
 .cover { display: grid; grid-template-columns: minmax(0, 1.22fr) minmax(0, 1fr); align-items: center; gap: clamp(2rem, 5.8vw, 6rem); padding: .65rem 0 2.15rem; }
 .cover-copy { min-width: 0; padding-block: .5rem; }
@@ -159,7 +160,7 @@ code { font-size: .89em; color: #524135; background: #ece9e1; padding: .07em .23
   .pager > * { min-width: 1.7rem; padding-inline: .25rem; }
 }
 @media print {
-  .mast nav, .count, .page-tools, .pager-bottom, .cover-actions .primary-link, .site-foot, .skip { display: none; }
+  .mast nav, .count, .page-tools, .cover-actions .primary-link, .site-foot, .skip { display: none; }
   .wrap { width: 100%; }
   .cover-art img { max-height: 12rem; object-fit: contain; }
   .entry { break-inside: avoid; }

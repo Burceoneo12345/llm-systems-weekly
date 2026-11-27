@@ -93,6 +93,17 @@ function page(title, root, active, content) {
 </body></html>`;
 }
 
+function pageControls(position) {
+  const bottom = position === "bottom";
+  return `<nav class="page-tools" id="pagination-${position}" aria-label="${bottom ? "底部页码" : "顶部页码"}" hidden>
+    <label class="page-size">每页条数 <span><select id="${bottom ? "page-size-bottom" : "page-size"}">
+      <option value="5">5 条</option><option value="10" selected>10 条</option><option value="15">15 条</option><option value="all">全部</option>
+    </select></span></label>
+    ${bottom ? '<span class="page-status"></span>' : ""}
+    <div class="pager"></div>
+  </nav>`;
+}
+
 function issuePage(issue, root, latest) {
   const stories = issue.stories.map((story, index) => {
     const body = [...story.body];
@@ -131,12 +142,7 @@ function issuePage(issue, root, latest) {
       <span>${weekday}</span></div><span class="count">${stories.length} 条进展</span></header>
     <h1 class="sr-only">${longDate(issue.date)}大模型系统周报</h1>
     ${issue.intro.length ? `<div class="issue-note">${marked.parser(issue.intro)}</div>` : ""}
-    <div class="page-tools" hidden>
-      <label class="page-size">每页条数 <span><select id="page-size">
-        <option value="5">5 条</option><option value="10" selected>10 条</option><option value="15">15 条</option><option value="all">全部</option>
-      </select></span></label>
-      <nav class="pager" aria-label="顶部页码"></nav>
-    </div>
+    ${pageControls("top")}
     ${stories[0] ?? ""}
     ${stories.length > 1 ? `<section class="index-section" aria-label="论文与源码">
       <div class="reading-rail"><h2>论文与源码</h2><p class="coverage">${escape(issue.coverage)}</p>
@@ -144,7 +150,7 @@ function issuePage(issue, root, latest) {
       <div class="index-list">${stories.slice(1).join("")}</div></section>` :
       `<div class="compact-coverage"><span>${escape(issue.coverage)}</span><a href="${original}">Markdown 原文</a><a href="${root}weeks/${issue.date}/">本期固定链接</a></div>`}
     ${issue.follow?.length ? `<section class="follow"><h2>本周跟进</h2>${marked.parser(issue.follow)}</section>` : ""}
-    <nav class="pager pager-bottom" aria-label="底部页码" hidden></nav>`);
+    ${pageControls("bottom")}`);
 }
 
 const assetVersion = createHash("sha256").update(readFileSync("site.css")).update(readFileSync("filter.js")).digest("hex").slice(0, 10);
