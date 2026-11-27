@@ -1,19 +1,19 @@
 const items = [...document.querySelectorAll("article[data-topics]")];
 const params = new URLSearchParams(location.search);
-const topic = params.get("topic");
-const matches = topic ? items.filter(item => JSON.parse(item.dataset.topics).includes(topic)) : [];
 const follow = document.querySelector(".follow");
-if (matches.length) {
-  for (const item of items) item.hidden = !matches.includes(item);
-  document.querySelector(".count").textContent = `${matches.length} 条进展`;
-  const index = document.querySelector(".index-section");
-  index?.classList.toggle("only-rail", !index.querySelector(".entry:not([hidden])"));
-  if (follow) follow.hidden = true;
-}
+const tocItems = [...document.querySelectorAll(".toc li")];
+
+// Collapsed outline on narrow screens, open where the rail is wide enough; labels follow the disclosure state.
+const toc = document.querySelector(".toc");
+if (toc && matchMedia("(max-width: 61rem)").matches) toc.open = false;
+document.addEventListener("toggle", (event) => {
+  const summary = event.target.querySelector?.(":scope > summary");
+  if (summary?.dataset.expand) summary.textContent = event.target.open ? summary.dataset.collapse : summary.dataset.expand;
+}, true);
 
 const sizeSelects = document.querySelectorAll(".page-size select");
 if (sizeSelects.length && items.length) {
-  const stories = matches.length ? matches : items;
+  const stories = items;
   const sizes = [...sizeSelects[0].options].map(option => option.value);
   const defaultSize = sizeSelects[0].querySelector("[selected]").value;
   const size = sizes.includes(params.get("size")) ? params.get("size") : defaultSize;
@@ -31,6 +31,13 @@ if (sizeSelects.length && items.length) {
     if (selectedSize === defaultSize) url.searchParams.delete("size");
     else url.searchParams.set("size", selectedSize);
     return url;
+  }
+
+  function syncToc() {
+    for (const li of tocItems) {
+      const item = document.getElementById(li.dataset.for);
+      li.hidden = !item || item.hidden || item.classList.contains("off-page");
+    }
   }
 
   function showPage() {
@@ -64,6 +71,7 @@ if (sizeSelects.length && items.length) {
       nav.hidden = pages === 1;
       nav.replaceChildren(links.cloneNode(true));
     }
+    syncToc();
     if (anchor >= 0) stories[anchor].scrollIntoView();
   }
 

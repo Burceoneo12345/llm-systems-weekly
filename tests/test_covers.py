@@ -15,7 +15,7 @@ class HeadlineCoverTest(unittest.TestCase):
             root = Path(directory)
             (root / "reports").mkdir()
             (root / "assets/covers").mkdir(parents=True)
-            for asset in ("site.css", "filter.js", "assets/compute-cover.webp"):
+            for asset in ("site.css", "filter.js", "assets/favicon.svg", "assets/apple-touch-icon.png"):
                 shutil.copy(ROOT / asset, root / asset)
             (root / "PROMPT.md").write_text("# 周报提示词")
             base = "# 周报\n\n覆盖区间\n"
